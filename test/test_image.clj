@@ -1,22 +1,6 @@
 (ns test_image
-  (:use snapp.componentTree.image)
-  (:use clojure.test))
-
-
-;;; A few functions for making test images
-
-(defn checker-board
-  "A function of a variable number of arguements that produces a checkerboard pattern consisting
-   of cells that have sides of 4. Cells with odd parity index are set to 0, otherwise they are
-   set to an amplitude between 0 and 255 according to the absolute value of the cosine of
-   the product of the indicies."
-  [& args]
-  (let [ints (map #(int (/ % 4)) args)]
-	(if (even? (apply + ints))
-	  (* 255 (Math/abs (Math/cos (apply * ints))))
-	  0)))
-
-
+  (:use clj-ctree.image
+		clojure.test))
 
 (deftest image2d_test
   (let [im (make-image2d-from-fn 16 32 checker-board)]
@@ -25,11 +9,157 @@
 	(is (= (count (:raster im)) (* (:rows im) (:cols im))))
 	(is (= (get-image2d-pixel im 0 0) 255))))
 
-
 (deftest image3d_test
   (let [im (make-image3d-from-fn 8 16 32 checker-board)]
 	(is (= (:layers im) 8))
 	(is (= (:rows im) 16))
 	(is (= (:cols im) 32))
 	(is (= (count (:raster im)) (* (:layers im) (:rows im) (:cols im))))
-	(is (= (get-image3d-pixel im 0 0 0) 255))))
+	(is (= (get-image3d-voxel im 0 0 0) 255))))
+
+(deftest image_offset_conversion
+  (let [ivec [1 2 3]
+		dvec [10 20 30]
+		dprods (dimensions-to-dimension-products dvec)
+		offset 621]
+	(is (= (with-dimensions-site-to-offset dvec ivec) offset))
+	(is (= (with-dimensions-offset-to-site dvec offset) ivec))
+	(is (= (with-dimension-products-site-to-offset dprods ivec) offset))
+	(is (= (with-dimension-products-offset-to-site dprods offset) ivec))))
+
+(deftest image_test
+  (let [dvec [10 20 30],
+		dprods (dimensions-to-dimension-products dvec),
+		img (make-image-from-fn
+			 dvec
+			 #(with-dimensions-site-to-offset dvec [%1 %2 %3])),
+		iters 10]
+	(is (= (:dimension-products img) dprods))
+	(dotimes [i iters]
+	  (let [ivec (map rand-int dvec)]
+		(is (= (get-image-element img ivec)
+			   (with-image-site-to-offset img ivec)))))))
+
+
+(deftest lattice-neighbor-test
+  (is (lattice-neighbors? [0 0 0] [1 0 1]))
+  (is (lattice-neighbors? [0 0 0] [0 0 1] 1))
+  (is (not (lattice-neighbors? [0 0 0] [1 1 1] 1)))
+  (let [dprods (dimensions-to-dimension-products [10 10 10])]
+	(is (with-dimension-products-neighbors?
+		  dprods
+		  (with-dimension-products-site-to-offset dprods [5 5 5])
+		  (with-dimension-products-site-to-offset dprods [5 5 6])
+		  1))
+	(is (not (with-dimension-products-neighbors?
+			   dprods
+			   (with-dimension-products-site-to-offset dprods [5 5 5])
+			   (with-dimension-products-site-to-offset dprods [6 6 6])
+			   1))))
+  (let [img-2d (make-blobby-image-2d 100)]
+	(is (= (apply * (:dimensions img-2d)) (count (:raster img-2d))))
+	(is (= ((:dimension-products img-2d) 0) 1))
+	(is (= ((:dimension-products img-2d) 1) ((:dimensions img-2d) 0) 100))
+	(is (with-image-neighbors?
+		  img-2d
+		  (with-image-site-to-offset img-2d [50 50])
+		  (with-image-site-to-offset img-2d [51 50])
+		  1))
+	(is (not (with-image-neighbors?
+			   img-2d
+			   (with-image-site-to-offset img-2d [50 50])
+			   (with-image-site-to-offset img-2d [51 51])
+			   1))))
+   (let [img-3d (make-blobby-image-3d 10)]
+	(is (= (apply * (:dimensions img-3d)) (count (:raster img-3d))))
+	(is (= ((:dimension-products img-3d) 0) 1))
+	(is (= ((:dimension-products img-3d) 1) ((:dimensions img-3d) 0) 10))
+	(is (= ((:dimension-products img-3d) 2)
+		   (apply * (map #((:dimensions img-3d) %) [0 1]))
+		   100))
+	(is (with-image-neighbors?
+		  img-3d
+		  (with-image-site-to-offset img-3d [5 5 5])
+		  (with-image-site-to-offset img-3d [5 6 5])
+		  1))
+	(is (not (with-image-neighbors?
+			   img-3d
+			   (with-image-site-to-offset img-3d [5 5 5])
+			   (with-image-site-to-offset img-3d [6 5 6])
+			   1)))))
+
+(deftest shift-register-seq-test
+  (let [seq-k8-n3-p00010111 '([0 0 0] [0 0 1] [0 1 0] [1 0 1] [0 1 1] [1 1 1] [1 1 0] [1 0 0])]
+	(is (= (shift-register-seq 8 3 [0 0 0 1 0 1 1 1]) seq-k8-n3-p00010111))))
+
+(deftest generate-preprimes-test
+  (let [preprimes-m3-n4 [[0 0 0 0] [0 0 0 1] [0 0 0 2] [0 0 1 0] [0 0 1 1] [0 0 1 2] [0 0 2 0] [0 0 2 1]
+						 [0 0 2 2] [0 1 0 1] [0 1 0 2] [0 1 1 0] [0 1 1 1] [0 1 1 2] [0 1 2 0] [0 1 2 1]
+						 [0 1 2 2] [0 2 0 2] [0 2 1 0] [0 2 1 1] [0 2 1 2] [0 2 2 0] [0 2 2 1] [0 2 2 2]
+						 [1 1 1 1] [1 1 1 2] [1 1 2 1] [1 1 2 2] [1 2 1 2] [1 2 2 1] [1 2 2 2] [2 2 2 2]]]
+	(is (= (generate-preprimes 3 4) preprimes-m3-n4))))
+
+(deftest deBruijn-cycle-test
+  (let [cycle-m2-n5 '(0 0 0 0 0 1 0 0 0 1 1 0 0 1 0 1 0 0 1 1 1 0 1 0 1 1 0 1 1 1 1 1)]
+	(is (= (deBruijn-cycle 2 5) cycle-m2-n5))))
+
+(deftest get-neighborhood-mask-test
+  (let [offsets-n1-r1 '([1] [-1]),
+		offsets-n2-r1 '([0 1] [1 0] [0 -1] [-1 0]),
+		offsets-n2-r2 '([0 1] [1 0] [0 -1] [-1 1] [1 1] [1 -1] [-1 -1] [-1 0]),
+		offsets-n3-r1 '([0 0 1] [0 1 0] [1 0 0] [0 0 -1] [0 -1 0] [-1 0 0]),
+		offsets-n3-r2 '([0 0 1] [0 1 0] [1 0 0] [0 0 -1] [0 -1 0] [-1 0 1]
+						[0 1 1] [1 1 0] [1 0 1] [0 1 -1] [1 -1 0] [-1 0 -1]
+						  [0 -1 1] [-1 1 0] [1 0 -1] [0 -1 -1] [-1 -1 0] [-1 0 0]),
+		offsets-n3-r3 '([0 0 1] [0 1 0] [1 0 0] [0 0 -1] [0 -1 0] [-1 0 1] [0 1 1]
+						  [1 1 0] [1 0 1] [0 1 -1] [1 -1 0] [-1 0 -1] [0 -1 1]
+							[-1 1 0] [1 0 -1] [0 -1 -1] [-1 -1 1] [-1 1 1] [1 1 1]
+							  [1 1 -1] [1 -1 1] [-1 1 -1] [1 -1 -1] [-1 -1 -1] [-1 -1 0]
+								[-1 0 0])]
+	(is (= (get-neighborhood-mask 1 1) offsets-n1-r1))
+	(is (= (get-neighborhood-mask 2 1) offsets-n2-r1))
+	(is (= (get-neighborhood-mask 2 2) offsets-n2-r2))
+	(is (= (get-neighborhood-mask 3 1) offsets-n3-r1))
+	(is (= (get-neighborhood-mask 3 2) offsets-n3-r2))
+	(is (= (get-neighborhood-mask 3 3) offsets-n3-r3))))
+
+(deftest translate-mask-test
+  (let [neighborhood-x1-y1-r1 '([1 2] [2 1] [1 0] [0 1])]
+	(is (= (translate-mask (get-neighborhood-mask 2 1) [1 1]) neighborhood-x1-y1-r1))))
+
+(deftest interior-site?-test
+  (is (true? (interior-site? [10 10] [5 5])))
+  (is (true? (interior-site? [10 10] [0 0])))
+  (is (false? (interior-site? [10 10] [5 10])))
+  (is (true? (interior-site? [10] [5])))
+  (is (true? (interior-site? [10 10 10] [5 5 5]))))
+
+(deftest get-neighboring-sites-test
+  (let [neighbors-16-16-2-1-0-0 '([0 1] [1 0]),
+		neighbors-16-16-2-1-15-15 '([15 14] [14 15]),
+		neighbors-16-16-2-1-7-7 '([7 8] [8 7] [7 6] [6 7])]
+	(is (= (get-neighboring-sites [16 16] (get-neighborhood-mask 2 1) [0 0]) neighbors-16-16-2-1-0-0))
+	(is (= (get-neighboring-sites [16 16] (get-neighborhood-mask 2 1) [15 15]) neighbors-16-16-2-1-15-15))
+	(is (= (get-neighboring-sites [16 16] (get-neighborhood-mask 2 1) [7 7]) neighbors-16-16-2-1-7-7))))
+
+(deftest get-neighboring-offsets-test
+  (let [offsets-16-16-2-1-0 '(16 1),
+		offsets-16-16-2-2-0 '(16 1 17)
+		offsets-16-16-2-2-17 '(33 18 1 32 34 2 0 16)
+		img2d (make-blobby-image-2d 16)
+		img3d (make-blobby-image-3d 8)
+		offsets-8-8-8-3-2-0 '(64 8 1 72 9 65)
+		offsets-8-8-8-3-2-72 '(136 80 73 8 64 144 81 137 16 65 128 9 0)
+		offsets-8-8-8-3-2-219 '(283 227 220 155 211 282 291 228 284 163 212 154 275 226 156 147 210 218)]
+	(is (= (get-neighboring-offsets [16 16] [1 16] (get-neighborhood-mask 2 1) 0) offsets-16-16-2-1-0))
+	(is (= (get-neighboring-offsets [16 16] [1 16] (get-neighborhood-mask 2 2) 0) offsets-16-16-2-2-0))
+	(is (= (get-neighboring-offsets [16 16] [1 16] (get-neighborhood-mask 2 2) 17) offsets-16-16-2-2-17))
+	(is (= (with-image-get-neighboring-offsets img2d (get-neighborhood-mask 2 1) 0) offsets-16-16-2-1-0))
+	(is (= (with-image-get-neighboring-offsets img2d (get-neighborhood-mask 2 2) 0) offsets-16-16-2-2-0))
+	(is (= (with-image-get-neighboring-offsets img2d (get-neighborhood-mask 2 2) 17) offsets-16-16-2-2-17))
+	(is (= (with-image-get-neighboring-offsets img3d (get-neighborhood-mask 3 2) 0) offsets-8-8-8-3-2-0))
+	(is (= (with-image-get-neighboring-offsets img3d (get-neighborhood-mask 3 2) 72) offsets-8-8-8-3-2-72))
+	(is (= (with-image-get-neighboring-offsets img3d (get-neighborhood-mask 3 2) 219) offsets-8-8-8-3-2-219))
+))
+
+
