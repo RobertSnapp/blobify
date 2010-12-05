@@ -37,7 +37,7 @@
 	(is (= (:dimension-products img) dprods))
 	(dotimes [i iters]
 	  (let [ivec (map rand-int dvec)]
-		(is (= (get-image-element img ivec)
+		(is (= (apply (partial get-pixel img) ivec)
 			   (with-image-site-to-offset img ivec)))))))
 
 
@@ -162,4 +162,8 @@
 	(is (= (with-image-get-neighboring-offsets img3d (get-neighborhood-mask 3 2) 219) offsets-8-8-8-3-2-219))
 ))
 
-
+(deftest get-filtered-neighborhood-test
+  (let [im4 (make-blobby-image-2d 4),
+		mask_2_3 (get-neighborhood-mask 2 3),
+		even-valued-neighbors-of-offset-6 (set '(1 2 3 5 7))]
+	(= (set (get-filtered-neighborhood im4 mask_2_3 even? 6)) even-valued-neighbors-of-offset-6)))

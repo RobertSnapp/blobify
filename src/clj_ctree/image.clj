@@ -20,6 +20,8 @@
   (:use [clojure.contrib.math :only (abs)])
   (:use [clojure.contrib.generic.math-functions :only (pow)]))
 
+(declare get-pixel)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; image2d
 ;;
@@ -164,14 +166,6 @@ and column c."
   [image offset]
   (with-dimension-products-offset-to-site (:dimension-products image) offset))
 
-
-;;; Image accessor
-(defn get-image-element
-  "Returns the image element stored at the indicated index vector. An exception occurs
-   if the dimensionality of the index vector disagrees with that of the image."
-  [image site]
-  ((:raster image) (with-dimension-products-site-to-offset
-					 (:dimension-products image) site)))
 
 ;;; Image creation
 (defn make-image-from-fn
@@ -464,7 +458,7 @@ arg3. (See also generate-neighboring-offsets.)"
 
 (defn get-filtered-neighborhood
   [image mask f offset]
-  (filter (fn [x] (f (nth (:raster image) x)))
+  (filter (fn [x] (f (get-pixel image x)))
 		  (with-image-get-neighboring-offsets image mask offset)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -478,7 +472,7 @@ arg3. (See also generate-neighboring-offsets.)"
    should evaluate to integers that fall within the admissible
    range of values for each dimension."
   [image]
-  (let [filter (fn [i j] (get-image-element image [i j 3]))
+  (let [filter (fn [i j] (get-pixel image i j 3))
 		rows   ((:dimensions image) 0)
 		cols   ((:dimensions image) 1)
 		raster (for [i rows j cols]
@@ -496,7 +490,7 @@ arg3. (See also generate-neighboring-offsets.)"
 		raster (.getRaster buffer)]
 	(dorun
 	 (for [i (range rows) j (range cols)]
-	   (.setSample raster j i 0 (get-image-element image (slice-fn j i)))))
+	   (.setSample raster j i 0 (apply (partial get-pixel image) (slice-fn j i)))))
 	buffer))
 
 (defn identity-2d
@@ -543,7 +537,7 @@ of integers."
 	(dorun (for [i (range h)]
 			 (cl-format true "~{~4a ~}~%"
 						(for [j (range w)]
-						  (nth (:raster image) (with-image-site-to-offset image [j i]))))))
+						  (get-pixel image (with-image-site-to-offset image [j i]))))))
 	nil))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
