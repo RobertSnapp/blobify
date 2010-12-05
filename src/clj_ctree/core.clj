@@ -4,7 +4,7 @@
   (:use  clj-ctree.vectors
 		 clj-ctree.polynomial
 		 clj-ctree.image
-		 clj-ctree.utils										; clojure.zip
+		 clj-ctree.utils				; dbg, seq2redundant-map
 		 clojure.set
 		 clojure.contrib.pprint
 		 ))

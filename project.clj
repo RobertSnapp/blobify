@@ -1,11 +1,13 @@
-(defproject imageAnalysis-componentTree "0.1"
+(defproject clj-ctree "0.1"
   :description "A prototype of the component tree datastructure and related tools for analyziing grayscale voxel arrays."
-  :dependencies [[org.clojure/clojure "1.1.0"]
-				 [org.clojure/clojure-contrib "1.1.0"]
-				 [leiningen/lein-swank "1.1.0"]]
-  :namespaces [snapp.algebra.vectors
-			   snapp.algebra.polynomial
-			   snapp.componentTree.core
-			   snapp.componentTree.main
-			   snapp.componentTree.image]
-  :main snapp.componentTree.main)
+  :dependencies [[org.clojure/clojure "1.2.0"]
+				 [org.clojure/clojure-contrib "1.2.0"]]
+  :dev-dependencies [[swank-clojure "1.2.1"]]
+  :namespaces [
+			   clj-ctree.core
+			   clj-ctree.image
+			   clj-ctree.main
+			   clj-ctree.polynomial
+			   clj-ctree.utils
+               clj-ctree.vectors]
+  :main clj-ctree.main)
