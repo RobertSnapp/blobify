@@ -13,12 +13,13 @@
 ;;;
 
 (ns clj-ctree.image
-  (:import (java.awt.image BufferedImage PixelGrabber WritableRaster))
-  (:use clj-ctree.vectors)
-  (:use clj-ctree.polynomial)
-  (:use clojure.contrib.pprint)
-  (:use [clojure.contrib.math :only (abs)])
-  (:use [clojure.contrib.generic.math-functions :only (pow)]))
+  (:import (java.awt.image BufferedImage DataBufferByte PixelGrabber WritableRaster))
+  (:use clj-ctree.vectors
+		clj-ctree.polynomial
+		clj-ctree.utils
+		clojure.contrib.pprint
+		[clojure.contrib.math :only (abs)]
+		[clojure.contrib.generic.math-functions :only (pow)]))
 
 (declare get-pixel)
 
@@ -174,8 +175,8 @@ and column c."
    element. An image structure is returned."
   [dimensions image-fn]
   (let [dimension-products (dimensions-to-dimension-products dimensions)
-		raster (vec (for [i (range (apply * dimensions))]
-					  (apply image-fn
+		raster (byte-array (for [i (range (apply * dimensions))]
+					  (apply (comp int-to-ubyte (partial min 255) image-fn)
 							 (with-dimension-products-offset-to-site
 							   dimension-products i))))]
 	(struct image dimensions dimension-products raster)))
@@ -217,14 +218,14 @@ the two Cartesian directions. The image countains 13 positive clusters."
 							  (+ x0 (* a*dTheta % (Math/sin (* dTheta %))))) (range n)),
 		amps (map #(/ 1000 (+ 10 %)) (range n)),
 		gen   (fn [v]
-				(int (inner-product amps
+				(int-to-ubyte (min 255 (inner-product amps
 							   (map #(Math/exp
 									  (/ (vector-square
 										  (vector-sub v %))
-										 (- sigma2*2))) centers))))
+										 (- sigma2*2))) centers)))))
 		dimensions (vector width width),
 		dimension-products (dimensions-to-dimension-products dimensions)
-		raster (vec (map #(gen
+		raster (byte-array (map #(gen
 					  (with-dimension-products-offset-to-site
 						dimension-products %))
 					(range (apply * dimensions))))]
@@ -253,17 +254,18 @@ the three Cartesian directions. The image contains 13 positive clusters."
 							  ) (range n)),
 		amps (map #(/ 1500 (+ 10 %)) (range n)),
 		gen   (fn [v]
-				(int (inner-product amps
+				(int-to-ubyte (min 255 (inner-product amps
 							   (map #(Math/exp
 									  (/ (vector-square
 										  (vector-sub v %))
-										 (- sigma2*2))) centers))))
+										 (- sigma2*2))) centers)))))
 		dimensions (vector width width width),
 		dimension-products (dimensions-to-dimension-products dimensions)
-		raster (vec (map #(gen
+		size (apply * dimensions)
+		raster (byte-array (map #(gen
 					  (with-dimension-products-offset-to-site
 						dimension-products %))
-					(range (apply * dimensions))))]
+						 (range size)))]
 	(struct image dimensions dimension-products raster)))
 
 
@@ -551,10 +553,11 @@ of integers."
   "Given an image (arg1) and an address, either as a scalar offset (arg2), or as a
 multi-dimensional site (args2 - argsN), get-pixel returns the scalar value of the
 indicated pixel."
-  ([{:keys [raster] :as image} offset] (nth raster offset))
+  ([{:keys [raster] :as image} offset]
+	 (ubyte-to-int (aget raster offset)))
   ([{:keys [dimension-products raster] :as image} i1 i2 & irest]
 	 (let [site (vec (concat (vector i1 i2) (vec irest)))]
-	   (nth raster (with-dimension-products-site-to-offset dimension-products site)))))
+	   (ubyte-to-int (aget raster (with-dimension-products-site-to-offset dimension-products site))))))
 
 (defn get-size
   "Given an image (arg1), returns the number of components in the raster."

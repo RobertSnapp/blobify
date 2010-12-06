@@ -7,6 +7,10 @@
   (:use clj-ctree.utils)
   (:use clojure.test))
 
+(deftest int-to-ubyte-test
+  (for [i (range 255)]
+	(is (= (ubyte-to-int (int-to-ubyte i)) i))))
+
 (deftest seq2map-test
   (let [times10 #(vector % (* 10 %))
 		input-seq '(1 2 3 4 5)

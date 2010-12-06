@@ -6,6 +6,22 @@
 		clojure.contrib.pprint))
 
 
+;;; type conversion
+(defn int-to-ubyte
+  "Converts the integer x (arg1) in the range [0, 255] to a byte. Note that bytes in clojure and java are
+regrettably always signed."
+  [ x ]
+  {:pre [(<= 0 x 255)]}
+  (byte (if (< x 128) x (- x 256))))
+
+(defn ubyte-to-int
+  "Converts the unsigned byte x (arg1), which should be in the range [-128, 127] to a non-negative
+integer, in the interval [0, 255]"
+  [ x ]
+  {:pre [(<= -128 x 127)]}
+  (let [y (int x)]
+	(if (<= 0 y) y (+ 256 y))))
+
 ;;; contributed by Garw W. Johnson, Jr.:
 (defn seq2map
   "Constructs a map from a sequence by applying keyvalfn to each

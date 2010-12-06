@@ -29,7 +29,7 @@ topologically connected components with intensities equal to or greater than eac
 		   k-values (keys bins)]
 	   (letfn [(get-intensity
 				[offset]
-				(nth (:raster image) offset))
+				(get-pixel image offset))
 
 			   (get-bright-neighbors
 				[offset]
@@ -45,14 +45,14 @@ topologically connected components with intensities equal to or greater than eac
 				  (loop [open-sets active-sets current-set (into #{} (list offset)) other-sets ()]
 					(if (empty? open-sets)
 					  (conj other-sets current-set)
-					  (let [aset (first open-sets),
-							[new-current-set new-other-sets] (if (empty? (intersection neighbors aset))
-															   (vector current-set (conj other-sets aset))
-															   (vector (union aset current-set) other-sets))]
+					  (let [s (first open-sets),
+							[new-current-set new-other-sets] (if (empty? (intersection neighbors s))
+															   (vector current-set (conj other-sets s))
+															   (vector (union s current-set) other-sets))]
 						(dbg-indent :make-ctree-cc 1 "(intersection ~a ~a) => ~a"
-									neighbors aset (intersection neighbors aset))
-						(dbg-indent :make-ctree-cc 1 "aset-> ~a, new-current-set-> ~a, new-other-sets -> ~a~%"
-									aset new-current-set new-other-sets)
+									neighbors s (intersection neighbors s))
+						(dbg-indent :make-ctree-cc 1 "s -> ~a, new-current-set-> ~a, new-other-sets -> ~a~%"
+									s new-current-set new-other-sets)
 						(recur (rest open-sets) new-current-set new-other-sets))))))
 			   ]
 		 (loop [ctree (sorted-map-by #(compare %2 %1)) b bins]
