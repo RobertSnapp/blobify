@@ -3,11 +3,10 @@
   :dependencies [[org.clojure/clojure "1.2.0"]
 				 [org.clojure/clojure-contrib "1.2.0"]]
   :dev-dependencies [[swank-clojure "1.2.1"]]
-  :namespaces [
-			   clj-ctree.core
-			   clj-ctree.image
-			   clj-ctree.main
-			   clj-ctree.polynomial
-			   clj-ctree.utils
-               clj-ctree.vectors]
+  :aot [ clj-ctree.core
+		 clj-ctree.image
+		 clj-ctree.main
+		 clj-ctree.polynomial
+		 clj-ctree.utils
+        clj-ctree.vectors]
   :main clj-ctree.main)
