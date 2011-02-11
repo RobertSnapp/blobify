@@ -151,7 +151,7 @@ integer, in the interval [0, 255]"
   (when-not (empty? seq)
 	(concat (rest seq) (list (first seq)))))
 
-#_(defn shiif-seq-right
+#_(defn shift-seq-right
   [seq])
 
 ;;; debugging tools insipired by Peter Norvig, from "Paradigms of Artificial Intelligence Programming"
