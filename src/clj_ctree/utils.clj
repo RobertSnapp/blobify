@@ -185,21 +185,69 @@ integer, in the interval [0, 255]"
 	[]
 	@dbg-stream)
 
-  (defn dbg
-	"If the indicated debug id (arg1) is active, then the provided format-string (arg2),
+;;; TODO: Test when-dbg more thoroughly
+  ;; (defmacro when-dbg
+  ;; 	[id & body]
+  ;; 	(list 'if (contains? @dbg-ids id)
+  ;; 	  (cons 'do body)))
+
+  ;; The macro versions of these commands assume the state of dbg-ids at the time of compilation. This is not
+  ;; so useful.
+
+(defmacro when-dbg
+  [id & body]
+  `(if (contains? ~(deref dbg-ids) ~id)
+	 (do ~@body)))
+
+  
+;;; TODO: Figure out why the following does not work.
+;;   (defmacro dbg
+;; 	"If the indicated debug id (arg1) is active, then the provided format-string (arg2),
+;; which may refer to optional additional arguments (arg3+) is printed to the current debug
+;; stream using cl-format."
+;; 	[id format-string & args]
+;; 	`(when-dbg ~id
+;; 			  ((partial cl-format ~(deref dbg-stream) ~format-string) ~@args)))
+
+(defn dbg
+  "If the indicated debug id (arg1) is active, then the provided format-string (arg2),
 which may refer to optional additional arguments (arg3+) is printed to the current debug
 stream using cl-format."
-	[id format-string & args]
-	(when (contains? @dbg-ids id)
-	  (apply (partial cl-format @dbg-stream format-string) args)))
+  [id format-string & args]
+  (when (contains? @dbg-ids id)
+	(apply (partial cl-format @dbg-stream format-string) args)))
 
-  (defn dbg-indent
-	[id n format-string & args]
+(defn dbg-indent
+  [id n format-string & args]
+  (when (contains? @dbg-ids id)
 	(let [fmt-string (apply str (concat "~&" (take (* 3 n) (repeat \space)) format-string))]
-	  (apply (partial dbg  id fmt-string) args)))
+	  (apply (partial cl-format @dbg-stream fmt-string) args))))
+
+;; (defmacro dbg-indent
+;; [id n format-string & args]
+;; `(let [fmt-string# (apply str (concat "~&" (take (* 3 ~n) (repeat \space)) ~format-string))]
+;;    (when-dbg ~id ((partial cl-format ~(deref dbg-stream) fmt-string#) ~@args))))
   
   (defn debug-reset
 	[]
 	(dosync (ref-set dbg-ids #{})
-			(ref-set dbg-stream true)))) 
+			(ref-set dbg-stream true)))
+  ) 
 
+;;;
+(defn tree-select
+  [filter-fn children-fn list-of-trees]
+  (loop [lot list-of-trees result ()]
+	(if (empty? lot)
+	  result
+	  (let [tree (first lot)]
+		(if (filter-fn tree)
+		  (recur (rest lot) (cons tree result))
+		  (recur (concat (children-fn tree) (rest lot)) result))))))
+
+#_(defn tree-reduce
+  [f g children value tree]
+  (let [nodes (children tree)]
+	(if (empty? nodes)
+	  value
+	  (reduce f value (children-fn )))))
