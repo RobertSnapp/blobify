@@ -17,44 +17,55 @@ of offsets corresponding to each intensity value."
   (letfn [(key-value-pair [x] (vector (get-pixel image x) x))]
 	(seq2redundant-map (range (get-size image)) key-value-pair conj :sort-down)))
 
+; (debug :make-ctree-gbn) ; remove/insert leading comment to toggle debugging
+; (debug :make-ctree-cc) ; remove/insert leading comment to toggle debugging
 
-(defn make-ctree
-  "Given an image (arg1) and a maximum Hamming radius (arg2), make-ctree generates and returns
-a component tree for the image, consisting of a map with integer keys, corresponding to a decreasing
-sequence of image intensities, with corresponding values consisting of lists of sets of the
-topologically connected components with intensities equal to or greater than each intensity threshold."
+(defn make-ctree-as-map-of-unions
+  "Given an image (arg1) and a maximum Hamming radius (arg2), make-ctree-as-a-map-of-unions
+generates and returns a component tree for the image, consisting of a map with integer keys,
+corresponding to a decreasing sequence of image intensities, with corresponding values
+consisting of lists of sets of the topologically connected components with intensities
+equal to or greater than each intensity threshold."
   ([image max-hamming-radius min-intensity]
 	 (let [bins (filter #(>= (first %) min-intensity) (bin-by-intensity image))
 		   kernel (get-neighborhood-mask (get-dimensionality image) max-hamming-radius)
 		   k-values (keys bins)]
-	   (letfn [(get-intensity
-				[offset]
-				(get-pixel image offset))
-
-			   (get-bright-neighbors
-				[offset]
-				(let [threshold (get-intensity offset)
+	   (letfn [(get-bright-neighbors	; return a list of offsets with intensities that are greater
+				[offset]				; than or equal to that of the indicated offset (arg1).
+				(let [threshold (get-pixel image offset)
 					  value (get-filtered-neighborhood image kernel #(<= threshold %1) offset)]
 				  (dbg :make-ctree-gbn "(get-bright-neighbors ~a) => ~s~%" offset value)
 				  value))
-
+			   
+			   ;; In the following, a component is implemented as a set. Components that include 
+			   ;; pixels with intensities greater than or equal to that of the indicated offset (arg2)
+			   ;; will be collected and returned as a list of sets. The function begins with a list
+			   ;; of components, called active-sets (arg1), that are defined for the minimum pixel
+			   ;; intensity greater than that of offset (arg2). (For the initial iteration, active-sets
+			   ;; is set to nil.) The main body of make-ctree uses reduce to merge components that
+			   ;; become topologically adjacent as the threshold is decreased. collect-components
+			   ;; scans the list of active sets, merging those that contain a topological neighbor of
+			   ;; offset, and returns the result, as a list of sets.
 			   (collect-components
 				[active-sets offset]
 				(let [neighbors (into #{} (get-bright-neighbors offset))]
 				  (dbg :make-ctree-cc "active-sets-> ~a, offset-> ~a:~%" active-sets offset)
+				  ;; In the loop, current-set is the component that contains offset. The other-sets
+				  ;; is a list of components (taken from open-sets) that are not adjacent to offset.
 				  (loop [open-sets active-sets current-set (into #{} (list offset)) other-sets ()]
 					(if (empty? open-sets)
-					  (conj other-sets current-set)
+					  (let [value (conj other-sets current-set)]
+						(dbg-indent :make-ctree-cc 1 "returning ~a~%" value)
+						value)
 					  (let [s (first open-sets),
 							[new-current-set new-other-sets] (if (empty? (intersection neighbors s))
 															   (vector current-set (conj other-sets s))
 															   (vector (union s current-set) other-sets))]
 						(dbg-indent :make-ctree-cc 1 "(intersection ~a ~a) => ~a"
 									neighbors s (intersection neighbors s))
-						(dbg-indent :make-ctree-cc 1 "s -> ~a, new-current-set-> ~a, new-other-sets -> ~a~%"
+						(dbg-indent :make-ctree-cc 1 "s-> ~a, new-current-set-> ~a, new-other-sets -> ~a~%"
 									s new-current-set new-other-sets)
-						(recur (rest open-sets) new-current-set new-other-sets))))))
-			   ]
+						(recur (rest open-sets) new-current-set new-other-sets))))))]
 		 (loop [ctree (sorted-map-by #(compare %2 %1)) b bins]
 		   (if (empty? b)
 			 ctree
