@@ -1,12 +1,20 @@
 ;;; The implementation of the component tree for gray-level images.
 
 (ns clj-ctree.core
-  (:use  clj-ctree.vectors
-		 clj-ctree.polynomial
-		 clj-ctree.image
-		 clj-ctree.utils				; dbg, seq2redundant-map
-		 clojure.set
-		 clojure.contrib.pprint
+  (:use  [clj-ctree.image :only (get-dimensionality
+								 get-filtered-neighborhood
+								 get-neighborhood-mask
+								 get-pixel
+								 get-size
+								 with-image-get-neighboring-offsets)]
+		 [clj-ctree.utils :only (dbg
+								 dbg-indent
+								 least-above
+								 seq2redundant-map
+								 when-dbg)]
+		 [clojure.set :only (intersection
+							 union)]
+		 [clojure.contrib.pprint :only (cl-format)]
 		 ))
 
 (defn bin-by-intensity
