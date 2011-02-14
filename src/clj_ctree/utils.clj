@@ -2,9 +2,8 @@
 
 
 (ns clj-ctree.utils
-  (:use clojure.set
-		clojure.contrib.pprint))
-
+  (:use [clojure.set :only (difference union)]
+		[clojure.contrib.pprint :only (cl-format)]))
 
 ;;; type conversion
 (defn int-to-ubyte
@@ -30,7 +29,6 @@ integer, in the interval [0, 255]"
   [aseq keyvalfn]
   (into {} (map keyvalfn aseq)))
 
-
 ;;; contributed by Garw W. Johnson, Jr.:
 (defn seq2redundant-map
   "Constructs a map from a sequence by applying keyvalfn to each
@@ -55,7 +53,6 @@ integer, in the interval [0, 255]"
  ([aseq keyvalfn mergefn]
 	(seq2redundant-map aseq keyvalfn mergefn :hash)))
 
-
 ;; Numeric functions
 (defn least-above
   "Returns the minimum value in coll (arg2) that is greater than x (arg1)."
@@ -73,7 +70,6 @@ integer, in the interval [0, 255]"
 	  nil
 	  (apply max (filter #(< % x) coll)))))
 
-  
 (defn absolutely-within
   "Returns true if and only if the absolute difference between x and y is within eps.
    Otherwise, false is returned. See also relatively-epsilon."
@@ -139,20 +135,25 @@ integer, in the interval [0, 255]"
   "Given a sequence seq and value val, returns a list of all integer positions
    in the sequence that matches val. An empty list is returned if no matches
    are found."
-  [val seq]
-  (loop [s seq i 0 output ()]
-	(cond (empty? s) output
+  [val s]
+  (loop [s s i 0 output []]
+	(cond (empty? s) (seq output)
 		  (= (first s) val) (recur (rest s) (inc i) (conj output i))
 		  :else (recur (rest s) (inc i) output))))
 
 
 (defn shift-seq-left
   [seq]
-  (when-not (empty? seq)
+  (if (empty? seq)
+	()
 	(concat (rest seq) (list (first seq)))))
 
-#_(defn shift-seq-right
-  [seq])
+(defn shift-seq-right
+  [seq]
+  (if (empty? seq)
+	()
+	(let [size (count seq)]
+	  (concat (list (last seq)) (take (dec size) seq)))))
 
 ;;; debugging tools insipired by Peter Norvig, from "Paradigms of Artificial Intelligence Programming"
 ;;; Morgan-Kaufmann, San Francisco, 1992, pages 123--124.
@@ -161,7 +162,8 @@ integer, in the interval [0, 255]"
 	  dbg-stream (ref true)]
 
   (defn debug
-	"Add one or more ids to the list of active debug keys. See also functions undebug and dbg"
+	"Add one or more ids to the list of active debug keys. See also functions undebug and dbg
+dbg-indent, debug-reset, and when-dbg."
 	[& ids]
 	(dosync (alter dbg-ids union (set ids))))
   
@@ -212,12 +214,16 @@ integer, in the interval [0, 255]"
 (defn dbg
   "If the indicated debug id (arg1) is active, then the provided format-string (arg2),
 which may refer to optional additional arguments (arg3+) is printed to the current debug
-stream using cl-format."
+stream using cl-format. See also dbg-indent, debug, debug-reset, and when-dbg."
   [id format-string & args]
   (when (contains? @dbg-ids id)
 	(apply (partial cl-format @dbg-stream format-string) args)))
 
 (defn dbg-indent
+  "If the indicated debug id (arg1) is active, then the provided format-string (arg3),
+which may refer to optional additional arguments (arg4+) is printed to the current debug
+stream using cl-format with an indentation level of n (arg2). See also dbg, debug,
+debug-rest, and when-dbg."
   [id n format-string & args]
   (when (contains? @dbg-ids id)
 	(let [fmt-string (apply str (concat "~&" (take (* 3 n) (repeat \space)) format-string))]
@@ -229,25 +235,29 @@ stream using cl-format."
 ;;    (when-dbg ~id ((partial cl-format ~(deref dbg-stream) fmt-string#) ~@args))))
   
   (defn debug-reset
+	"Clears the list of debug ids, and resets the debug stream to true (stdio)."
 	[]
 	(dosync (ref-set dbg-ids #{})
 			(ref-set dbg-stream true)))
   ) 
 
 ;;;
+;;; TODO: Create a test for this function:
+;;;
 (defn tree-select
-  [filter-fn children-fn list-of-trees]
-  (loop [lot list-of-trees result ()]
-	(if (empty? lot)
-	  result
-	  (let [tree (first lot)]
-		(if (filter-fn tree)
-		  (recur (rest lot) (cons tree result))
-		  (recur (concat (children-fn tree) (rest lot)) result))))))
+  "Given a node-test predicate, a node-children accessor function (arg2) and a list of trees (arg3),
+tree-select navigates up each tree, and returns a list of nodes that satisfy the node-test. Note
+that if a node passes the test, then its children are not tested. Thus we seek the set of shallowest
+nodes (those closest to the root) within each lineage branch that sastifies the node test.
+With each recursive iteration, a node is tested. If it passes the test, then it is added to the
+list of hits, which will eventually be returned. Note that if any node passes the test, then
+its children are ignored."
+  [node-test? get-children-fn list-of-trees]
+  (loop [candidates list-of-trees hits ()]
+	(if (empty? candidates)
+	  hits
+	  (let [subject (first candidates)]
+		(if (node-test? subject)
+		  (recur (rest candidates) (conj hits subject))
+		  (recur (concat (get-children-fn subject) (rest candidates)) hits))))))
 
-#_(defn tree-reduce
-  [f g children value tree]
-  (let [nodes (children tree)]
-	(if (empty? nodes)
-	  value
-	  (reduce f value (children-fn )))))
