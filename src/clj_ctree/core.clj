@@ -98,13 +98,10 @@ followed by a list of integers that correspond to the size of each component."
 ;;; pixel intensity of the pixels that are included with this node. The offsets is a set 
 ;;; of these pixels in the current raster vector. 
 
-(defstruct ctree :intensity :offsets :children)
-
-;; TODO: change defstruct to defrecord:
-;; (defrecord ctree [intensity offsets children])
-;;
+(defrecord ComponentTreeNode [intensity offsets area energy children])
 
 (defn ctree-contains-offset?
+  "Returns true if the ctree contains the indicated intensity-offset pair"
   [ctree intensity offset]
   (cond (empty? ctree) false,
 		(< intensity (:intensity ctree)) false,
@@ -115,11 +112,13 @@ followed by a list of integers that correspond to the size of each component."
   "Creates a new ctree created by merging the two indicated ctrees, indicated that the components
 represented by each unite at the minimum intensity of the two. Note that the function is symmetric."
   [ct1 ct2]
-  (let [{i1 :intensity s1 :offsets ch1 :children} ct1
-		{i2 :intensity s2 :offsets ch2 :children} ct2]
-	(cond (< i1 i2) (struct ctree i1 s1 (conj ch1 ct2)),
-		  (= i1 i2) (struct ctree i1 (union s1 s2) (concat ch1 ch2)),
-		  :else (struct ctree i2 s2 (conj ch2 ct1)))))
+  (let [{i1 :intensity set1 :offsets ch1 :children a1 :area e1 :energy} ct1
+		{i2 :intensity set2 :offsets ch2 :children a2 :area e2 :energy} ct2
+		area-sum (+ a1 a2)
+		energy-sum (+ e1 e2)]
+	(cond (< i1 i2) (ComponentTreeNode. i1 set1 area-sum energy-sum (conj ch1 ct2)),
+		  (= i1 i2) (ComponentTreeNode. i1 (union set1 set2)  area-sum energy-sum (concat ch1 ch2)),
+		  :else (ComponentTreeNode. i2 set2 area-sum energy-sum (conj ch2 ct1)))))
 
 (defn pprint-ctree
   ([stm level {:keys [intensity offsets children] :as ctree}]
@@ -132,7 +131,7 @@ represented by each unite at the minimum intensity of the two. Note that the fun
   ([ctree] (pprint-ctree true 0 ctree)))
 
 (defn make-ctree
-  "Given an image structure (arg1), an integer hamming radius (arg2), and a minimum intensity
+  "Given an Image (arg1), an integer hamming radius (arg2), and a minimum intensity
 threhsold, make-ctree generates a component tree for the image assuming the topology specified
 by the second argument (adjacent lattice sites within the hamming radius are topologically
 connected). Pixel intensities below min-intensity are ignored."
@@ -160,15 +159,16 @@ connected). Pixel intensities below min-intensity are ignored."
 			   ;; the current offset, and returns the result, as a list of ctrees.
 			   (collect-components
 				[ctrees offset]
-				(let [neighbors (get-bright-neighbors offset)]
+				(let [neighbors (get-bright-neighbors offset)
+					  intensity (get-pixel image offset)]
 				  (dbg :make-ctree-cc "active-sets-> ~a, offset-> ~a:~%" ctrees offset)
 				  ;; In the loop, current-set is the component that contains offset. The other-sets
 				  ;; is a list of components (taken from open-sets) that are not adjacent to offset.
 				  (loop [open-roots ctrees,
-						 local-root (struct ctree (get-pixel image offset) (set (list offset)) nil),
+						 local-root (ComponentTreeNode. intensity (set (list offset)) 1 intensity nil),
 						 other-roots nil]
 					(if (empty? open-roots)
-					  (let [value (conj other-roots local-root)]
+					  (let [value (conj other-roots local-root)]  ; here the let facilitates the following side effect.
 						(dbg-indent :make-ctree-cc 1 "returning ~a~%" value)
 						value)
 					  (let [s (first open-roots)]
@@ -187,8 +187,14 @@ connected). Pixel intensities below min-intensity are ignored."
 								 offsets)]
 			  (recur k-sets (rest b)))))))))
 
-(defn chop
+(defn chop-intensity
   [ctrees threshold]
   (letfn [(filter-fn [ctree] (<= threshold (:intensity ctree)))
+		  (children-fn [ctree] (:children ctree))]
+	(tree-select filter-fn children-fn ctrees)))
+
+(defn chop-area
+  [ctrees threshold]
+  (letfn [(filter-fn [ctree] (>= threshold (:area ctree)))
 		  (children-fn [ctree] (:children ctree))]
 	(tree-select filter-fn children-fn ctrees)))
