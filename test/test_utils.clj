@@ -17,7 +17,6 @@
 		output-map {1 10, 2 20, 3 30, 4 40, 5 50}]
 	(is (= (seq2map input-seq times10) output-map))))
 
-
 (deftest seq2redundant-map-test
   (let [input-seq [4 2 3 4 4 1 6 3 4],
 		ifcn #(vector % %),
@@ -58,6 +57,39 @@
   (is (relatively-within 0.01 1.0001 1.0))
   (is (not (relatively-within 0.01 2.001 1.0))))
 
+;;; position tests
+(deftest pos-test
+  (let [int30 (take 30 (cycle (range 6)))
+	    odd-locs (vec (range 1 30 2))
+		unit-locs (vec (range 1 30 6))]
+	(= (pos-if odd? int30) (first odd-locs))
+	(= (pos-if* odd? int30) odd-locs)
+	(= (pos-value 1 int30) 1)
+	(= (pos-value* 1 int30) unit-locs)
+	))
+
+(deftest get-index-list-test
+  (let [seq20 '(a b a a b 5 a a b a 10 a a b a 15 a a a b)
+		b-locs '(1 4 8 13 19)]
+	(= (get-index 'b seq20) 1)
+	(nil? (get-index 'c seq20))
+	(= (get-index-list 'b seq20) b-locs)
+	(= (get-index-list 'c seq20) ())))
+		 
+;;; Shift registers
+(deftest shift-seq-test
+  (let [seq3  '(a b c)
+		seq3r '(c a b)
+		seq3l '(b c a)
+		seq1 '(a)]
+	(is (= (shift-seq-left  seq3) seq3l))
+	(is (= (shift-seq-right seq3) seq3r))
+	(is (= (shift-seq-left  seq1) seq1))
+	(is (= (shift-seq-right seq1) seq1))
+	(is (= (shift-seq-left  ()) ()))
+	(is (= (shift-seq-right ()) ()))))
+
+
 ;;; Tests for debug
 
 (deftest debug-test
@@ -76,4 +108,3 @@
   (is (nil? (dbg-indent :dbg-test2 5 "debug-test: This line should be indented ~r spaces: [line ~a of ~a]~%" (* 5 3) 3 3)))
   (undebug :dbg-test2)
   )
-		 
