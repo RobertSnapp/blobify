@@ -1,42 +1,44 @@
 ;;; image.clj
 ;;;
-;;; This file defines a structures for a two-dimensional raster image, called image2d,
-;;; a three-dimensionsal voxel image, called image3d, and more general (and preferred)
-;;; multidimensional image, called image. All images are for the time being monochrome
+;;; This file defines a record for a two-dimensional raster image, called Image2d,
+;;; a three-dimensionsal voxel image, called Image3d, and more general (and preferred)
+;;; multidimensional image, called Image. All images are for the time being monochrome
 ;;; untagged, and uncompressed.
 ;;;
 ;;; Each structure is similar, consisting of a raster field that maintains the image
 ;;; data in a one-dimensional raster vector of integers. The other fields help manage the
 ;;; addressing, which is specialized to each type.
 ;;;
-;;; Created by Robert R. Snapp, Copyright (c) 2010.
+;;; Created by Robert R. Snapp, Copyright (c) 2010-2011.
 ;;;
 
 (ns clj-ctree.image
   (:import (java.awt.image BufferedImage DataBufferByte PixelGrabber WritableRaster))
-  (:use clj-ctree.vectors
-		clj-ctree.polynomial
-		clj-ctree.utils
-		clojure.contrib.pprint
+  (:use [clj-ctree.vectors :only (inner-product l-infinity-distance vector-add vector-sub vector-square)]
+		[clj-ctree.polynomial :only (interpolate multi-horner)]
+		[clj-ctree.utils :only (int-to-ubyte ubyte-to-int)]
+		[clojure.contrib.pprint :only (cl-format)]
 		[clojure.contrib.math :only (abs)]
 		[clojure.contrib.generic.math-functions :only (pow)]))
 
 (declare get-pixel)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; image2d
+;; Image2d
 ;;
-;; image2d represents a two-dimensional raster image. 
+;; Image2d represents a two-dimensional raster image. 
 ;; The fields :rows and :cols indicate the integer-valued image dimesions.
 ;; The field :raster should indicate a one-dimensional vector that contains
 ;; the image raster.
-(defstruct image2d :rows :cols :raster)
+
+
+(defrecord Image2d [rows cols raster])
 
 (defn make-image2d-from-fn
   [rows cols image-fn]
   (let [raster (vec (for [i (range rows) j (range cols)]
 					  (image-fn j i)))]
-	(struct image2d rows cols raster)))
+	(Image2d. rows cols raster)))
 
 (defn get-image2d-pixel
   "Return the value of the specified image pixel"
@@ -44,14 +46,14 @@
   ((:raster image) (+ j (* i (:cols image)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; image3d represents a three-dimensional volumetric image.  
-(defstruct image3d :layers :rows :cols :raster)
+;; Image3d represents a three-dimensional volumetric image.  
+(defrecord Image3d [layers rows cols raster])
 
 (defn make-image3d-from-fn
   [layers rows cols image-fn]
    (let [raster (vec (for [k (range layers) i (range rows) j (range cols)]
 					  (image-fn j i k)))]
-	(struct image3d layers rows cols raster)))
+	(Image3d. layers rows cols raster)))
 
 (defn get-image3d-voxel
   "Return the value of the specified image voxel, situated in layer l, row r,
@@ -60,7 +62,7 @@ and column c."
   ((:raster image) (+ c (* (+  r (* l (:rows image))) (:cols image)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; image represents a more general multi-dimensional image. The field indicated
+;; Image represents a more general multi-dimensional image. The field indicated
 ;; by :dimensions should be a vector containing the image dimensions, and
 ;; :diimension-products should be a vector that contains successive products
 ;; of the image dimensions that is used for computing raster offset from
@@ -69,9 +71,7 @@ and column c."
 ;; raster offest of voxel [i1, i2, i3] to be obtained by a simple inner-product:
 ;; i.e., (inner-product [i1, i2, i3] [1, d1, d1*d2]).
 
-(defstruct image :dimensions :dimension-products :raster)
-
-
+(defrecord Image [dimensions dimension-products raster])
 
 ;;; Utility functions to obtain raster offsets for the image structure
 
@@ -129,15 +129,6 @@ and column c."
 ;;; functions will be more efficient for repeated callls using the same
 ;;; image dimensions.
 
-;;; Obsolete. Replaced by site-to-offset using multi-horner
-#_(defn with-dimensions-site-to-offset
-  "Given a vector of array dimensions [d1, d2, d3, ..., dn], and an index vector
-   [i1, i2, i3, ..., in], this function returns the offset of the indicated
-   array element i1 + d1*i2 + d1*d2*i3 + ... + d1*d2*...*d(n-1)*in."
-  [dimensions site]
-  (let [dimension-products (dimensions-to-dimension-products dimensions)]
-	(inner-product dimension-products site)))
-
 (defn with-dimensions-site-to-offset
   "Given a vector of array dimensions [d1, d2, d3, ..., dn], and an index vector
    [i1, i2, i3, ..., in], this function returns the offset of the indicated
@@ -179,7 +170,7 @@ and column c."
 					  (apply (comp int-to-ubyte (partial min 255) image-fn)
 							 (with-dimension-products-offset-to-site
 							   dimension-products i))))]
-	(struct image dimensions dimension-products raster)))
+	(Image. dimensions dimension-products raster)))
 
 ;;; Test multivariate fundtions.
 
@@ -229,7 +220,7 @@ the two Cartesian directions. The image countains 13 positive clusters."
 					  (with-dimension-products-offset-to-site
 						dimension-products %))
 					(range (apply * dimensions))))]
-	(struct image dimensions dimension-products raster)))
+	(Image. dimensions dimension-products raster)))
 
 ;; a three-dimensions-image with n (13) blobs
 
@@ -266,7 +257,7 @@ the three Cartesian directions. The image contains 13 positive clusters."
 					  (with-dimension-products-offset-to-site
 						dimension-products %))
 						 (range size)))]
-	(struct image dimensions dimension-products raster)))
+	(Image. dimensions dimension-products raster)))
 
 
 
@@ -479,7 +470,7 @@ arg3. (See also generate-neighboring-offsets.)"
 		cols   ((:dimensions image) 1)
 		raster (for [i rows j cols]
 				 (filter i j))]
-	(struct image2d rows cols raster)))
+	(Image2d. rows cols raster)))
 
 
 (defn image-to-BuffferedImage
@@ -544,6 +535,7 @@ of integers."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;  Public interface
+
 (defn get-dimensionality
   "Given an image (arg1) returns the dimensionality of the image, usually 2 or 3."
   [image]
