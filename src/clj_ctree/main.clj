@@ -15,8 +15,8 @@
 (ns clj-ctree.main
   (:import (java.awt GridBagLayout GridBagConstraints))
   (:import (javax.swing JFrame JPanel JLabel ImageIcon))
-  (:use clj-ctree.image)
-  (:use clj-ctree.core)
+  (:use [clj-ctree.image :only (make-blobby-image-2d)])
+  ; (:use clj-ctree.core)
   (:use clojure.contrib.command-line)
 ; (:use clojure.contrib.duck-streams)
   (:use [clojure.contrib.except :only (throw-if)])

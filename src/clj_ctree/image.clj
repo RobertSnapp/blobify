@@ -1,4 +1,4 @@
-;;; image.clj
+ ;;; image.clj
 ;;;
 ;;; This file defines a record for a two-dimensional raster image, called Image2d,
 ;;; a three-dimensionsal voxel image, called Image3d, and more general (and preferred)
@@ -180,7 +180,6 @@ and column c."
 
 
 ;;; Conversion functions that require the provision of the dimension-products vector.
-
 (defn with-dimension-products-site-to-offset
   "Given a vector of successive dimension products:
       [1, d1, d1*d2, ..., d1*d2*...*d[n-1]],

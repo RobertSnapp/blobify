@@ -37,8 +37,8 @@ integer, in the interval [0, 255]"
    already in the map, its current value will be combined with the new
    val using (mergefn curval val). An optional fourth argument defines
    the type of map that is assumed, chosen from the keywords
-   :unsorted (for a hash-map, default), :sorted-up (for a sorted-map
-   in increasing key order), and :sorted-down (for a sorted-map in
+   :unsorted (for a hash-map, default), :sort-up (for a sorted-map
+   in increasing key order), and :sort-down (for a sorted-map in
    decreasing key order)."
   ([aseq keyvalfn mergefn map-type]
 	 {:pre [(contains? #{:hash :sort-up :sort-down} map-type)]}
@@ -141,6 +141,13 @@ integer, in the interval [0, 255]"
 		  (= (first s) val) (recur (rest s) (inc i) (conj output i))
 		  :else (recur (rest s) (inc i) output))))
 
+(defn get-last-index
+  [val s]
+  (loop [s s i 0 index nil]
+    (cond (empty? s) index
+          (= (first s) val) (recur (rest s) (inc i) i)
+          :else (recur (rest s) (inc i) index))))
+
 
 (defn shift-seq-left
   [seq]
@@ -226,8 +233,8 @@ stream using cl-format with an indentation level of n (arg2). See also dbg, debu
 debug-rest, and when-dbg."
   [id n format-string & args]
   (when (contains? @dbg-ids id)
-	(let [fmt-string (apply str (concat "~&" (take (* 3 n) (repeat \space)) format-string))]
-	  (apply (partial cl-format @dbg-stream fmt-string) args))))
+	(let [fs (apply str (concat "~&" (take (* 3 n) (repeat \space)) format-string))]
+	  (apply (partial cl-format @dbg-stream fs) args))))
 
 ;; (defmacro dbg-indent
 ;; [id n format-string & args]
@@ -261,3 +268,50 @@ its children are ignored."
 		  (recur (rest candidates) (conj hits subject))
 		  (recur (concat (get-children-fn subject) (rest candidates)) hits))))))
 
+
+;;; string operations
+(defn get-directory
+  "Given a complete path string (arg1), returns a string that contains just the directory."
+  [path]
+  (let [sep (java.io.File/separatorChar)
+        sep-index (get-last-index sep (seq path))]
+    (if sep-index
+      (subs path 0 (inc sep-index))  ; increment index to include the separation character.
+      "")))
+
+(defn get-filename
+  "Given a complete path string (arg1), returns a string that contains the filenemae (with extension)."
+  [path]
+  (let [sep (java.io.File/separatorChar)
+        sep-index (get-last-index sep (seq path))]
+    (if sep-index
+      (subs path (inc sep-index))
+      path)))
+
+(defn get-filename-ext
+  "Given a complete path string (arg1), returns a string that contains just the file extension."
+  [path]
+  (let [dot \.
+        filename (get-filename path)
+        dot-index (get-last-index dot filename)]
+    (if dot-index
+      (subs filename dot-index)
+      "")))
+
+(defn get-filename-root
+  "Given a complete path string (arg1), returns a string that contains just the filename root
+ (without extension)."
+  [path]
+  (let [dot \.
+        filename (get-filename path)
+        dot-index (get-last-index dot filename)]
+    (if dot-index
+      (subs filename 0 dot-index)
+      filename)))
+
+(defn floor-rem
+  "Returns a two-element vector, the first element being the floor of the quotient of n/d,
+the second being the remainder of the quotient."
+  [n d]
+  (let [q (int (/ n d))]
+    (vector q (- n (* q d)))))
