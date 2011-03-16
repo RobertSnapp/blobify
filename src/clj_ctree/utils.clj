@@ -3,9 +3,12 @@
 
 (ns clj-ctree.utils
   (:use [clojure.set :only (difference union)]
-		[clojure.contrib.pprint :only (cl-format)]))
+		[clojure.contrib.pprint]))
 
+;;;
 ;;; type conversion
+;;;
+
 (defn int-to-ubyte
   "Converts the integer x (arg1) in the range [0, 255] to a byte. Note that bytes in clojure and java are
 regrettably always signed."

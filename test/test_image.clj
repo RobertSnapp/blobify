@@ -3,19 +3,19 @@
 		clojure.test))
 
 (deftest image2d_test
-  (let [im (make-image2d-from-fn 16 32 checker-board)]
-	(is (= (:rows im) 16))
+  (let [im (make-image2d-from-fn 32 16 checker-board)]
 	(is (= (:cols im) 32))
+	(is (= (:rows im) 16))
 	(is (= (count (:raster im)) (* (:rows im) (:cols im))))
-	(is (= (get-image2d-pixel im 0 0) 255))))
+	(is (= (get-pixel-site im [0 0]) 255))))
 
 (deftest image3d_test
-  (let [im (make-image3d-from-fn 8 16 32 checker-board)]
-	(is (= (:layers im) 8))
-	(is (= (:rows im) 16))
+  (let [im (make-image3d-from-fn 32 16 8 checker-board)]
 	(is (= (:cols im) 32))
+	(is (= (:rows im) 16))
+	(is (= (:layers im) 8))
 	(is (= (count (:raster im)) (* (:layers im) (:rows im) (:cols im))))
-	(is (= (get-image3d-voxel im 0 0 0) 255))))
+	(is (= (get-pixel-site im [0 0 0]) 255))))
 
 (deftest image_offset_conversion
   (let [ivec [1 2 3]
@@ -37,8 +37,8 @@
 	(is (= (:dimension-products img) dprods))
 	(dotimes [i iters]
 	  (let [ivec (map rand-int dvec)]
-		(is (= (apply (partial get-pixel img) ivec)
-			   (mod (with-image-site-to-offset img ivec) 255)))))))
+       (is (= (get-pixel-site img ivec)
+             (mod (get-offset-of-site img ivec) 255)))))))
 
 
 (deftest lattice-neighbor-test
@@ -62,13 +62,13 @@
 	(is (= ((:dimension-products img-2d) 1) ((:dimensions img-2d) 0) 100))
 	(is (with-image-neighbors?
 		  img-2d
-		  (with-image-site-to-offset img-2d [50 50])
-		  (with-image-site-to-offset img-2d [51 50])
+		  (get-offset-of-site img-2d [50 50])
+		  (get-offset-of-site img-2d [51 50])
 		  1))
 	(is (not (with-image-neighbors?
 			   img-2d
-			   (with-image-site-to-offset img-2d [50 50])
-			   (with-image-site-to-offset img-2d [51 51])
+			   (get-offset-of-site img-2d [50 50])
+			   (get-offset-of-site img-2d [51 51])
 			   1))))
    (let [img-3d (make-blobby-image-3d 10)]
 ;;	(is (= (apply * (:dimensions img-3d)) (count (:raster img-3d))))
@@ -79,13 +79,13 @@
 		   100))
 	(is (with-image-neighbors?
 		  img-3d
-		  (with-image-site-to-offset img-3d [5 5 5])
-		  (with-image-site-to-offset img-3d [5 6 5])
+		  (get-offset-of-site img-3d [5 5 5])
+		  (get-offset-of-site img-3d [5 6 5])
 		  1))
 	(is (not (with-image-neighbors?
 			   img-3d
-			   (with-image-site-to-offset img-3d [5 5 5])
-			   (with-image-site-to-offset img-3d [6 5 6])
+			   (get-offset-of-site img-3d [5 5 5])
+			   (get-offset-of-site img-3d [6 5 6])
 			   1)))))
 
 (deftest shift-register-seq-test

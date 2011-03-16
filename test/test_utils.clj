@@ -7,6 +7,35 @@
   (:use clj-ctree.utils)
   (:use clojure.test))
 
+;;; string opeations
+(deftest get-directory-test
+  (let [sep (java.io.File/separatorChar)
+        dot \.
+        p1 (str sep "root" sep "subdir1" sep "subdir2" sep "fileroot" dot "ext")
+        p1dir (str sep "root" sep "subdir1" sep "subdir2" sep)
+        p1root "fileroot"
+        p1ext (str dot "ext")
+        p2 (str "fileroot" dot "ext")
+        p2dir ""
+        p2root "fileroot"
+        p2ext (str dot "ext")
+        p3 (str sep "topdir" sep "subdirWithDotInName" dot "ok" sep "subdir2" sep "filenamewithoutext")
+        p3dir (str sep "topdir" sep "subdirWithDotInName" dot "ok" sep "subdir2" sep)
+        p3root "filenamewithoutext"
+        p3ext ""]
+    (is (= (get-directory p1) p1dir))
+    (is (= (get-filename-root p1) p1root))
+    (is (= (get-filename-ext p1) p1ext))
+
+    (is (= (get-directory p2) p2dir))
+    (is (= (get-filename-root p2) p2root))
+    (is (= (get-filename-ext p2) p2ext))
+
+    (is (= (get-directory p3) p3dir))
+    (is (= (get-filename-root p3) p3root))
+    (is (= (get-filename-ext p3) p3ext))
+
+    ))
 (deftest int-to-ubyte-test
   (for [i (range 255)]
 	(is (= (ubyte-to-int (int-to-ubyte i)) i))))
