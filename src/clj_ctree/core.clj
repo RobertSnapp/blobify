@@ -1,17 +1,27 @@
 ;;; The implementation of the component tree for gray-level images.
 
 (ns clj-ctree.core
+  (:import (java.awt.image BufferedImage)
+           (java.awt Color Graphics Dimension)
+           (javax.swing JPanel JFrame JLabel)
+           (ij ImagePlus)
+           (org.imagearchive.lsm.reader Reader))
   (:use  [clj-ctree.image :only (get-dimensionality
 								 get-filtered-neighborhood
 								 get-neighborhood-mask
 								 get-pixel
+                         get-pixel-site
+                         get-site-of-offset
 								 get-size
 								 with-image-get-neighboring-offsets)]
-		 [clj-ctree.utils :only (dbg
-								 dbg-indent
+         [clj-ctree.utils :only (dbg
+ 								 dbg-indent
+                         debug
 								 least-above
 								 seq2redundant-map
-								 when-dbg)]
+                         tree-select
+                         when-dbg)]
+         [clj-ctree.graphics :only (get-indexed-rgb)]
 		 [clojure.set :only (intersection
 							 union)]
 		 [clojure.contrib.pprint :only (cl-format)]
@@ -25,73 +35,8 @@ of offsets corresponding to each intensity value."
   (letfn [(key-value-pair [x] (vector (get-pixel image x) x))]
 	(seq2redundant-map (range (get-size image)) key-value-pair conj :sort-down)))
 
-; (debug :make-ctree-gbn) ; remove/insert leading comment to toggle debugging
-; (debug :make-ctree-cc) ; remove/insert leading comment to toggle debugging
-
-#_(defn make-ctree-as-map-of-unions
-  "Given an image (arg1) and a maximum Hamming radius (arg2), make-ctree-as-a-map-of-unions
-generates and returns a component tree for the image, consisting of a map with integer keys,
-corresponding to a decreasing sequence of image intensities, with corresponding values
-consisting of lists of sets of the topologically connected components with intensities
-equal to or greater than each intensity threshold."
-  ([image max-hamming-radius min-intensity]
-	 (let [bins (filter #(>= (first %) min-intensity) (bin-by-intensity image))
-		   kernel (get-neighborhood-mask (get-dimensionality image) max-hamming-radius)
-		   k-values (keys bins)]
-	   (letfn [(get-bright-neighbors	; return a list of offsets with intensities that are greater
-				[offset]				; than or equal to that of the indicated offset (arg1).
-				(let [threshold (get-pixel image offset)
-					  value (get-filtered-neighborhood image kernel #(<= threshold %1) offset)]
-				  (dbg :make-ctree-gbn "(get-bright-neighbors ~a) => ~s~%" offset value)
-				  value))
-			   
-			   ;; In the following, a component is implemented as a set. Components that include 
-			   ;; pixels with intensities greater than or equal to that of the indicated offset (arg2)
-			   ;; will be collected and returned as a list of sets. The function begins with a list
-			   ;; of components, called active-sets (arg1), that are defined for the minimum pixel
-			   ;; intensity greater than that of offset (arg2). (For the initial iteration, active-sets
-			   ;; is set to nil.) The main body of make-ctree uses reduce to merge components that
-			   ;; become topologically adjacent as the threshold is decreased. collect-components
-			   ;; scans the list of active sets, merging those that contain a topological neighbor of
-			   ;; offset, and returns the result, as a list of sets.
-			   (collect-components
-				[active-sets offset]
-				(let [neighbors (into #{} (get-bright-neighbors offset))]
-				  (dbg :make-ctree-cc "active-sets-> ~a, offset-> ~a:~%" active-sets offset)
-				  ;; In the loop, current-set is the component that contains offset. The other-sets
-				  ;; is a list of components (taken from open-sets) that are not adjacent to offset.
-				  (loop [open-sets active-sets current-set (into #{} (list offset)) other-sets ()]
-					(if (empty? open-sets)
-					  (let [value (conj other-sets current-set)]
-						(dbg-indent :make-ctree-cc 1 "returning ~a~%" value)
-						value)
-					  (let [s (first open-sets),
-							[new-current-set new-other-sets] (if (empty? (intersection neighbors s))
-															   (vector current-set (conj other-sets s))
-															   (vector (union s current-set) other-sets))]
-						(dbg-indent :make-ctree-cc 1 "(intersection ~a ~a) => ~a"
-									neighbors s (intersection neighbors s))
-						(dbg-indent :make-ctree-cc 1 "s-> ~a, new-current-set-> ~a, new-other-sets -> ~a~%"
-									s new-current-set new-other-sets)
-						(recur (rest open-sets) new-current-set new-other-sets))))))]
-		 (loop [ctree (sorted-map-by #(compare %2 %1)) b bins]
-		   (if (empty? b)
-			 ctree
-			 (let [[k offsets] (first b),
-				   k-sets (reduce #(collect-components %1 %2)
-								  (get ctree (least-above k k-values))
-								  offsets)]
-			   (recur (merge ctree (into {} (list (vector k k-sets)))) (rest b))))))))
-  ([image max-hamming-radius] (make-ctree-as-map-of-unions image max-hamming-radius 0)))
-
-#_(defn analyze-ctree-as-map-of-unions
-  "Given a component tree, ctree (arg1), as generated by make-ctree-as-map-of-unions, analyze-ctree
-generates a new map, with integer-valued keys, corresponding the intensities of the component tree,
-followed by a list of integers that correspond to the size of each component."
-  [ctree]
-  (into (sorted-map-by #(compare %2 %1))
-		(for [[k v] ctree]
-		  (vector k (map count v)))))
+;; (debug :make-ctree-gbn) ; remove/insert leading comment to toggle debugging
+;; (debug :make-ctree-cc) ; remove/insert leading comment to toggle debugging
 
 ;;; In the following, we try a more concise implementation in which each node in the component tree
 ;;; is implemented as a struct. The intensity should be an integer corresponding to the monochrome
@@ -198,3 +143,105 @@ connected). Pixel intensities below min-intensity are ignored."
   (letfn [(filter-fn [ctree] (>= threshold (:area ctree)))
 		  (children-fn [ctree] (:children ctree))]
 	(tree-select filter-fn children-fn ctrees)))
+
+
+;(debug :render-ctree)
+
+(defn render-ctree-2d
+  "Displays the 2d image (arg1) in a JFrame GUI, using a grayscale, along with each
+component tree in the list ctrees (arg2), which are each rendered using an index
+color."
+  [{:keys [dimensions raster] :as image} ctrees]
+  (let [max-side 1024
+        frame (JFrame. "Component Viewer")
+        cols (dimensions 0)
+        rows (dimensions 1)
+        scale (min (/ max-side (max cols rows)) 10)
+        buffer (new BufferedImage
+                    (* scale cols)
+                    (* scale rows)
+                    BufferedImage/TYPE_INT_ARGB)
+        canvas (proxy [JLabel] []
+                 (paint [g] (.drawImage g buffer 0 0 this)))
+        graphics (.createGraphics buffer)]
+    (doseq [x (range cols)
+            y (range rows)]
+      (let [v (get-pixel-site image (vector x y))]
+        (doto graphics
+          (.setColor (new Color v v v 255))
+          (.fillRect (* x scale) (* y scale) scale scale))))
+    
+    (doseq [ct (zipmap (iterate inc 0) ctrees)]
+      (let [color-index (first ct)]
+        (loop [ct (list (second ct))]
+          (when (not (empty? ct))
+            (let [current (first ct)
+                  intensity (:intensity current)
+                  offsets (:offsets current)
+                  children (:children current)]
+              (dbg :render-ctree  "intensity-> ~a, offsets-> ~a~%" intensity offsets)
+              (doseq [o (seq offsets)]
+                (let [[x y] (get-site-of-offset image o)
+                      [r g b] (get-indexed-rgb color-index)]
+                  (dbg :render-ctree  "   [x y] = [~a ~a]~%" x y)
+                  (doto graphics
+                    (.setColor (new Color r g b 144))
+                    (.fillRect (* x scale) (* y scale) scale scale))))
+              (recur (concat children (rest ct))))))))
+    
+    (.add frame canvas)
+    (.setSize frame (new Dimension (* scale cols) (+ 20 (* scale rows))))
+    (.show frame))
+  )
+
+
+(defn render-ctree-3d
+  "Displays the 3d image (arg1) in a JFrame GUI, using a grayscale, along with each
+component tree in the list ctrees (arg2), which are each rendered using an index
+color."
+  [{:keys [dimensions raster] :as image} ctrees]
+  (let [max-side 1024
+        frame (JFrame. "Component Viewer")
+        cols (dimensions 0)
+        rows (dimensions 1)
+        layers (dimensions 2)
+        scale (min (/ max-side (max cols rows)) 10)
+        buffer (new BufferedImage
+                    (* scale cols)
+                    (* scale rows)
+                    BufferedImage/TYPE_INT_ARGB)
+        canvas (proxy [JLabel] []
+                 (paint [g] (.drawImage g buffer 0 0 this)))
+        graphics (.createGraphics buffer)]
+    (doseq [x (range cols)
+            y (range rows)]
+      (let [v (for [z (range layers)] (get-pixel-site image (vector x y z)))
+            vm  (apply max v)]
+        (doto graphics
+          (.setColor (new Color vm vm vm 255))
+          (.fillRect (* x scale) (* y scale) scale scale))))
+    
+    (doseq [ct (zipmap (iterate inc 0) ctrees)]
+      (let [color-index (first ct)]
+        (loop [ct (list (second ct))]
+          (when (not (empty? ct))
+            (let [current (first ct)
+                  intensity (:intensity current)
+                  offsets (:offsets current)
+                  children (:children current)]
+              (dbg :render-ctree  "intensity-> ~a, offsets-> ~a~%" intensity offsets)
+              (doseq [o (seq offsets)]
+                (let [[x y _] (get-site-of-offset image o)
+                      [r g b] (get-indexed-rgb color-index)]
+                  (dbg :render-ctree  "   [x y] = [~a ~a]~%" x y)
+                  (doto graphics
+                    (.setColor (new Color r g b 144))
+                    (.fillRect (* x scale) (* y scale) scale scale))))
+              (recur (concat children (rest ct))))))))
+    
+    (.add frame canvas)
+    (.setSize frame (new Dimension (* scale cols) (+ 20 (* scale rows))))
+    (.show frame))
+  )
+
+
