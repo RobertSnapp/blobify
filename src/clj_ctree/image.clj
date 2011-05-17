@@ -1,4 +1,4 @@
- ;;; image.clj
+;;; image.clj
 ;;;
 ;;; This file defines a record for a two-dimensional raster image, called Image2d,
 ;;; a three-dimensionsal voxel image, called Image3d, and more general (and preferred)
@@ -20,9 +20,10 @@
            (ij.io Opener)
            (org.imagearchive.lsm.reader Reader))
   (:use [clj-ctree.vectors :only
-         (inner-product l-infinity-distance vector-add vector-sub vector-square)]
+         (inner-product l-infinity-distance vector-add vector-divide vector-sub vector-square)]
         [clj-ctree.polynomial :only (interpolate multi-horner)]
-        [clj-ctree.utils :only (dbg debug floor-rem int-to-ubyte ubyte-to-int get-directory get-filename seq2redundant-map)]
+        [clj-ctree.utils :only (dbg debug floor-rem int-to-ubyte ubyte-to-int
+                                    get-directory get-filename pos-if seq2redundant-map)]
         [clojure.contrib.pprint :only (cl-format)]
         [clojure.contrib.math :only (abs)]
         [clojure.contrib.generic.math-functions :only (pow)]))
@@ -32,15 +33,26 @@
 ;; Protocols
 
 (defprotocol ImageAccess
-  (get-pixel [this offset])
-  (get-pixel-site [this site])
-  (get-size [this])
-  (get-dimensions [this])
-  (get-dimensionality [this])
-  (get-offset-of-site [this site])
-  (get-site-of-offset [this offset])
+  "Functions that facilite access to the content of a variety of records that
+store different types of images defined using a finite-dimensional, rectangular
+raster."
+  (get-pixel [this offset] "Returns the image intensity at the indicated offset (arg2).")
+  (get-size [this] "Returns the total number picture elements (pixels) in the image.")
+  (get-dimensions [this] "Returns a vector indicating the maximum extent
+along each coordinate, beginning with cols, rows, layers, frames, etc.")
+  (get-dimensionality [this] "Returns the raster dimensionality.")
+  (get-offset-of-site [this site] "Returns the raster offset of the indicated site vector.")
+  (get-site-of-offset [this offset] "Returns the site vector of the indicated offset.")
+  (get-position-of-site [this site] "Returns the true spatial coordinates of a raster site.")
   )
 
+;; Higher level functions based on ImageAccess
+(defn get-pixel-site
+  "Given an image (arg1) and a vector site (arg2) of the from [i0 ... in-1],
+where n denotes the dimensionality of the image, (get-pixel-site image site)
+returns the intensity of the indicated pixel."
+  [image site]
+  (get-pixel image (get-offset-of-site image site)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Image2d
@@ -57,8 +69,6 @@
   ImageAccess
   (get-pixel [{:keys [raster] :as this} offset]
              (ubyte-to-int (aget raster offset)))
-  (get-pixel-site [{:keys [cols raster] :as this} site] ; l-vector is of the form [col-index row-index]
-             (ubyte-to-int (aget raster (+ (site 0) (* (site 1) cols)))))
   (get-size [{:keys [cols rows] :as this}]
             (* rows cols))
   (get-dimensions [{:keys [cols rows] :as this}]
@@ -71,8 +81,8 @@
                       (let [r (int (/ offset cols))
                             c (rem offset cols)]
                         (vector c r)))
+  (get-position-of-site [this site] site)
   )
-
 
 ;;; Constructors
 (defn make-image2d-from-fn
@@ -81,11 +91,6 @@
                              (int-to-ubyte (min 255 (image-fn j i)))))]
 	(Image2d. cols rows raster)))
 
-;;; Obsoleted by get-pixel-site (above)
-#_(defn get-image2d-pixel
-  "Return the value of the specified image pixel"
-  [image i j]
-  ((:raster image) (+ j (* i (:cols image)))))
 
 (defn make-image2d-pyramid
   [width]
@@ -101,25 +106,22 @@
   ImageAccess
   (get-pixel [{:keys [raster] :as this} offset]
              (ubyte-to-int (aget raster offset)))
-  (get-pixel-site [{:keys [cols rows raster] :as this} site] ; l-vector is of the form [col row layer]
-                  (ubyte-to-int (aget raster 
-                                      (+ (site 0)
-                                         (* cols
-                                            (+ (site 1)
-                                               (* rows (site 2))))))))
   (get-size [{:keys [cols rows layers] :as this}]
             (* rows cols layers))
   (get-dimensions [{:keys [cols rows layers] :as this}]
                   (vector cols rows layers))
   (get-dimensionality [this]
                       3)
-  (get-offset-of-site [{:keys [cols rows] :as this} site]
+  #_(get-offset-of-site [{:keys [cols rows] :as this} site]
                       (+ (site 0) (* cols (+ (site 1) (* rows (site 2))))))
+  (get-offset-of-site [{:keys [n-cols n-rows] :as this} [c r l]]
+                      (+ c (* n-cols (+ r (* n-rows l)))))
   (get-site-of-offset [{:keys [cols rows layers] :as this} offset]
                       (let [l (int (/ offset (* cols rows)))
                             r (int (/ (- offset (* l rows cols)) rows))
                             c (int (- offset (* rows (+ r (* cols l)))))]
                         (vector c r l)))
+  (get-position-of-site [this site] site)
   )
 
 ;; Constructors
@@ -135,12 +137,6 @@
    width width width
    (fn [x y z] (- (* 3/2 width) (apply + (map #(abs (- % (/ width 2))) [x y z]))))))
 
-;; Obsoleted by protocol ImageAccess
-#_(defn get-image3d-voxel
-  "Return the value of the specified image voxel, situated in layer l, row r,
-and column c."
-  [image c r l]
-  ((:raster image) (+ c (* (:cols image) (+ r (* (:rows image) l))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Image represents a more general multi-dimensional image. The field indicated
@@ -177,7 +173,6 @@ and column c."
 	  prods
 	  (let [next-product (* last-product (first dimensions))]
 		(recur (conj prods next-product) next-product (rest dimensions))))))
-
 
 ;;; Conversion functions that require the provision of the dimension-products vector.
 (defn with-dimension-products-site-to-offset
@@ -222,20 +217,6 @@ and column c."
   [dimensions offset]
   (let [dimension-products (dimensions-to-dimension-products dimensions)]
 	(with-dimension-products-offset-to-site dimension-products offset)))
-
-;;; Conversion functions that are sweetened to use an image, with a cached
-;;; dimension-product vector, as a reference.
-#_(defn with-image-site-to-offset
-  "Given an image and an index vector, returns the corresponding scalar raster offset.
-   Inverse of with-image-offset-to-image-vector"
-  [image i-vec]
-  (with-dimension-products-site-to-offset (:dimension-products image) i-vec))
-
-#_(defn with-image-offset-to-site
-  "Given an image and a raster offset, returns the corresponding index vector.
-   Inverse of with-image-site-to-offset"
-  [image offset]
-  (with-dimension-products-offset-to-site (:dimension-products image) offset))
 
 ;;; Image creation
 (defn make-image-from-fn
@@ -301,7 +282,6 @@ the two Cartesian directions. The image countains 13 positive clusters."
 	(Image. dimensions dimension-products raster)))
 
 ;; a three-dimensions-image with n (13) blobs
-
 (defn make-blobby-image-3d
   "Generates a three-dimensions test image with width (arg1) voxels along each of
 the three Cartesian directions. The image contains 13 positive clusters."
@@ -548,7 +528,6 @@ arg3. (See also generate-neighboring-offsets.)"
 				 (filter i j))]
 	(Image2d. rows cols raster)))
 
-
 (defn image-to-BuffferedImage
   "Creates a java BufferedImage object using the data from a two-dimensional
    slice that is defined by slice-fn, which maps two arguments to a
@@ -574,7 +553,6 @@ arg3. (See also generate-neighboring-offsets.)"
   [dimensions]
   (fn [j i] (apply + (map #() (range (peek dimensions))))))
 
-
 #_(defn image2d-to-BufferedImage
   "Creates a test image of the indicated dimensions"
   [{:keys [rows cols] :as image2d}]
@@ -595,7 +573,6 @@ arg3. (See also generate-neighboring-offsets.)"
       (.grabPixels))
     pixels))
 
-
 (defn pprint-image-2d
    "Pretty prints the image intensities of the indicated image (arg1) as a two-dimensional array
 of integers. Optional indices, for selecting a particular Cartesian slice if image has additional
@@ -609,7 +586,6 @@ dimensions, are collected into the list higher-indices, (arg2-argn)."
                         (for [j (range w)]
                           (get-pixel-site image (vec (concat [j i] index-tail)))))))))
 
-  
 ;; Obsolete
 #_(defn pprint-image-2d
   "Pretty prints the image intensities of the indicated two-dimensional image as an array
@@ -631,10 +607,6 @@ of integers."
   ImageAccess
   (get-pixel [{:keys [raster] :as this} offset]
              (ubyte-to-int (aget raster offset)))
-  (get-pixel-site
-   [{:keys [dimension-products raster] :as this} site] ; site  [i0 i1 ... id-1]
-   (ubyte-to-int (aget raster (with-dimension-products-site-to-offset dimension-products site))))
-  
   (get-size [{:keys [dimensions] :as this}]
             (apply * dimensions))
   (get-dimensions [{:keys [dimensions] :as this}]
@@ -645,33 +617,10 @@ of integers."
                       (with-dimension-products-site-to-offset dimension-products site))
   (get-site-of-offset [{:keys [dimension-products] :as this} offset]
                       (with-dimension-products-offset-to-site dimension-products offset))
+  (get-position-of-site [this site] site)
   )
 
 
-#_(defn get-dimensionality
-  "Given an image (arg1) returns the dimensionality of the image, usually 2 or 3."
-  [image]
-  (count (:dimensions image)))
-
-#_(defn get-pixel
-  "Given an image (arg1) and an address, either as a scalar offset (arg2), or as a
-multi-dimensional site (args2 - argsN), get-pixel returns the scalar value of the
-indicated pixel."
-  ([{:keys [raster] :as image} offset]
-	 (ubyte-to-int (aget raster offset)))
-  ([{:keys [dimension-products raster] :as image} i1 i2 & irest]
-	 (let [site (vec (concat (vector i1 i2) (vec irest)))]
-	   (ubyte-to-int (aget raster (with-dimension-products-site-to-offset dimension-products site))))))
-
-#_(defn get-size
-  "Given an image (arg1), returns the number of components in the raster."
-  [{:keys [dimensions] :as image}]
-  (apply * dimensions))
-
-#_(defn get-dimensions
-  "Given an image (arg1) returns the dimensions of the image as a vector of ints."
-  [{:keys [dimensions] :as image}]
-  dimensions)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
 ;;; ImageStack mantains multidimensional images as an array of rasters,
@@ -688,9 +637,6 @@ indicated pixel."
              (let [[slice-index slice-offset] (floor-rem offset (nth dimension-products 2))]
                #_(dbg :ImageStack "slice-index = ~a, slice-offset = ~a~%" slice-index slice-offset)
                (int (bit-and (aget (nth stack slice-index) slice-offset) 0xff))))
-  (get-pixel-site
-   [{:keys [dimension-products raster] :as this} site] ; site  [i0 i1 ... id-1]
-   (ubyte-to-int (aget raster (with-dimension-products-site-to-offset dimension-products site))))
   
   (get-size [{:keys [dimensions] :as this}]
             (apply * dimensions))
@@ -701,10 +647,15 @@ indicated pixel."
   (get-offset-of-site [{:keys [dimension-products] :as this} site]
                       (with-dimension-products-site-to-offset dimension-products site))
   (get-site-of-offset [{:keys [dimension-products] :as this} offset]
-                      (with-dimension-products-offset-to-site dimension-products offset)))
+                      (with-dimension-products-offset-to-site dimension-products offset))
+  (get-position-of-site [{:keys [voxelSize] :as this} site] (vec (map * site voxelSize)))
+)
+
 
 (def m568 "/Users/snapp/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
 (def m568c "/Users/snapp/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
+(def m567 "/Users/snapp/data/cellNuclei/ctree/tif/m567.tif")
+(def m588 "/Users/snapp/data/cellNuclei/ctree/tif/m588.tif")
 
 (defn openlsm
   "Open the lsm image indicated by path, and return the java ImagePlus object."
@@ -722,7 +673,7 @@ indicated pixel."
     imageplus))
 
 ;; Can we get the physical voxel dimensions?
-(defn openStackImage
+(defn open-stack-image
   "Open the image stack indicated by path (usually a tif file), and return an ImageStack record."
   [path init-slice delta]
   (let [opener (Opener.)
@@ -738,10 +689,12 @@ indicated pixel."
         dp (dimensions-to-dimension-products dims)
         stack (vec (map #(.. imageStack  (getProcessor %) getPixels) indices))]
     (ImageStack. path voxelSize dims dp stack)))
-;;;;;
-;;;;; Image Analysis
-;;;;;
 
+;;;================
+;;; Image Analysis
+;;;================
+;;; The following functions should work with every image type that implements the ImageAccess protocol.
+;;; These functions extract quantitative information from an image.
 (defn get-max
   "Returns the maximum intensity in an image"
   [image]
@@ -758,27 +711,44 @@ indicated pixel."
         (recur (rest vals) (assoc hist intensity (inc (nth hist intensity))))))))
 
 (defn normalize
-  "Normailizes "
+  "Normailizes a histogram (or other nonnegative vector) by dividing each entry by the sum."
   [hist]
   (let [sum (apply + hist)]
     (if (pos? sum)
-      (vec (map #(float (/ % sum)) hist))
+      (vector-divide hist (float sum))
       hist)))
 
+(defn successive-sums
+  "Given a sequencs of numbers, computes the sequence of partial sums."
+  ([nums]
+     (successive-sums (first nums) (rest nums)))
+  ([total nums]
+     (if (empty? nums)
+       (list total)
+       (lazy-seq (cons total (successive-sums (+ total (first nums)) (rest nums)))))))
+
+(defn cumulative-histogram
+  [image]
+  (let [unh (successive-sums (histogram image))]
+    (vector-divide unh (float (last unh)))))
+
+(defn inverse-cumulative-histogram
+  "Inverse histogram accepts two arguments, a cumulative histogram ch (arg1) and a number from
+the unit interval x (arg2). The index of the first entry that exceeds x is returned."
+  [ch x]
+  (pos-if #(>= % x) ch))
 
 ;;;;;
 ;;;;; Graphics
 ;;;;;
-
-; (def scale 5)
-(def max-side 1024)
 
 (defn render-image
   [{:keys [dimensions raster] :as image}]
   (let [frame (JFrame. "Image Viewer")
         cols (dimensions 0)
         rows (dimensions 1)
-        scale (min (/ max-side (max cols rows)) 10)
+        max-side 1024
+        scale (max (min (int (/ max-side (max cols rows))) 10) 1)
         buffer (new BufferedImage
                     (* scale cols)
                     (* scale rows)
