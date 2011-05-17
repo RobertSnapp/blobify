@@ -34,16 +34,21 @@
 	  (vec (concat diff (drop v2c v1))))))
   ([v1 v2 & more] (reduce vector-sub (vector-sub v1 v2) more)))
 
-(defn vector-scale
-  "Multiplies a vector v by and arbitray number of scalar s"
-  [v & scalars]
-  (let [s (apply * scalars)]
-	(vec (map #(* s %) v))))
+(defn vector-divide
+  "Divides a every element in vector v by a denominator d"
+  [v d]
+  (vec (map #(/ % d) v)))
+
+(defn vector-multiply
+  "Multiplies a every element in vector v by a scalar s"
+  [v s]
+  (vec (map #(* % s) v)))
 
 (defn vector-interp
-  "Linear interpolation between two vectors"
-  [a b x]
-  (vector-add (vector-scale a (- 1 x)) (vector-scale b x)))
+  "Returns a vector that is the linear interpolation between vectors v0 (arg1) and v1 (arg2),
+   with repsect to x (arg3), is that v0 is returned if f x=0, and v1 is returned if x=1."
+  [v0 v1 x]
+  (vector-add (vector-multiply v0 (- 1 x)) (vector-multiply v1 x)))
 
 (defn basis-vector
   "Generates an n-dimensional Cartesian basis vector conisting
