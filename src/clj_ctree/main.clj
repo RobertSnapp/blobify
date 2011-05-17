@@ -15,16 +15,53 @@
 (ns clj-ctree.main
   (:import (java.awt GridBagLayout GridBagConstraints))
   (:import (javax.swing JFrame JPanel JLabel ImageIcon))
-  (:use [clj-ctree.image :only (make-blobby-image-2d)])
-  ; (:use clj-ctree.core)
-  (:use clojure.contrib.command-line)
-; (:use clojure.contrib.duck-streams)
-  (:use [clojure.contrib.except :only (throw-if)])
-  (:use clojure.contrib.pprint)
-  (:gen-class))
+  (:use [clj-ctree.image :only (make-blobby-image-2d
+                                make-blobby-image-3d
+                                open-stack-image
+                                get-max
+                                get-pixel-site
+                                get-size
+                                cumulative-histogram
+                                inverse-cumulative-histogram)]
+        [clj-ctree.core :only (make-ctree render-ctree-3d make-summary print-distance-table)]
+        [clj-ctree.utils :only (dbg debug floor-rem int-to-ubyte ubyte-to-int
+                                    get-directory get-filename pos-if seq2redundant-map)]
+        [clojure.contrib.command-line :only (with-command-line)]
+        [clojure.contrib.except :only (throw-if)]
+        [clojure.contrib.pprint :only (cl-format)]
+        clojure.test)
+
+  ;;(:use clojure.contrib.command-line)
+  ;; (:use clojure.contrib.duck-streams)
+  ;; (:use [clojure.contrib.except :only (throw-if)])
+  ;; (:use clojure.contrib.pprint)
+  
+                                        ;(:gen-class)
+  )
 
 (def EMPTY_TILE (ImageIcon. "empty.png"))
 
+;;; Test images
+
+(def m568 "/Users/snapp/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
+(def m568c "/Users/snapp/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
+(def m567 "/Users/snapp/data/cellNuclei/ctree/tif/m567.tif")
+(def m588 "/Users/snapp/data/cellNuclei/ctree/tif/m588.tif")
+;;; Evaluate (run-tests ') 
+(deftest main-test
+  (def img16 (make-blobby-image-2d 16))
+  (def s1 (open-stack-image m567 0 2))
+  (is (= (count s1) 5))
+  (def s2 (open-stack-image m588 0 2))
+  (is (= (count s2) 5))
+  (def ch2 (cumulative-histogram s2))
+  )
+
+(deftest s1-test
+  (def s1 (open-stack-image m567 0 2))
+  (is (= (count s1) 5))
+  (def ch1 (cumulative-histogram s1))
+  (inverse-cumulative-histogram ch1 0.98))
 (defn empty-tile []
   (JLabel. EMPTY_TILE))
 
