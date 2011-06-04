@@ -1,5 +1,54 @@
-;;; Contains clojure functions that extend the power of clojure.
+;;; Contains functions that extend the power of clojure, for peforming a
+;;; variety of tasks:
+;;;
+;;; Type conversion
+;;; * int-to-ubyte
+;;; * ubyte-ti-int
+;;;
+;;; Seq construction
+;;; * seq2map
+;;; * seq2redundant-map
+;;;
+;;; Numerical evaluation
+;;; * least-above
+;;; * greatest-below
+;;; * absolutely-within
+;;; * relative-difference
+;;; * pos-if
+;;; * pos-if*
+;;; * pos-value
+;;; * pos-value*
+;;; * floor-rem
+;;; * square
+;;;
+;;; Sequence Operations
+;;; * get-index
+;;; * get-index-list
+;;; * get-last-index
+;;; * shift-seq-left
+;;; * shift-seq-right
 
+
+;;;
+;;; Debugging utilities
+;;; * debug
+;;; * undebug
+;;; * get-debug-ids
+;;; * set-debug-stream
+;;; * get-debug-stream
+;;; * when-dbg
+;;; * dbg
+;;; * dbg-indent
+;;; * dbg-reset
+;;;
+;;; * tree-select
+;;;
+;;; String Operations
+;;; * get-directory
+;;; * get-filename
+;;; * get-filename-ext
+;;; * get-filename-root
+;;;
 
 (ns clj-ctree.utils
   (:use [clojure.set :only (difference union)]
@@ -318,3 +367,8 @@ the second being the remainder of the quotient."
   [n d]
   (let [q (int (/ n d))]
     (vector q (- n (* q d)))))
+
+(defn square
+  "Computes the square of the argument."
+  [x]
+  (* x x))

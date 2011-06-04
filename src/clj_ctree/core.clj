@@ -11,18 +11,22 @@
 								 get-neighborhood-mask
 								 get-pixel
                          get-pixel-site
+                         get-offset-of-site
+                         get-scale-factors
                          get-site-of-offset
-                         get-position-of-site
 								 get-size
+                         scale-site
 								 with-image-get-neighboring-offsets)]
          [clj-ctree.utils :only (dbg
  								 dbg-indent
                          debug
 								 least-above
 								 seq2redundant-map
+                         square
                          tree-select
                          when-dbg)]
-         [clj-ctree.vectors :only (l2-distance
+         [clj-ctree.vectors :only (flat-vector-auto-product
+                                   l2-distance
                                    vector-sub
                                    vector-interp
                                    vector-square)]
@@ -49,36 +53,87 @@ of offsets corresponding to each intensity value."
 ;;; pixel intensity of the pixels that are included with this node. The offsets is a set 
 ;;; of these pixels in the current raster vector. 
 
-(defrecord ComponentTreeNode [intensity offsets size mean variance energy children])
+;; box represents a boudning box and should be a vector of the form [lower-offset upper-offset]
 
-(defn ctree-contains-offset?
+(defrecord ComponentTreeNode [intensity offsets size mean variance energy box children])
+
+(defn offset-inside-box?
+  "Returns true if and only if the lattice site referenced by offset in the current image lies
+within the closed bounding box represented by the lower and upper offsets."
+  [image offset [lower upper]]
+  (let [[lower-site upper-site offset-site] (map #(get-site-of-offset image %) (list lower upper offset))]
+    (every? true? (map #(<= %1 %2 %3) lower-site offset-site upper-site))))
+
+(defn site-inside-box?
+  "Returns true if and only if for the indicated image (arg1) the indicated lattice site (arg2)
+lies within the closed bounding box defined by the lower and upper offset vector (arg3)."
+  [image site [lower upper]]
+  (let [[lower-site upper-site] (map #(get-site-of-offset image %) (list lower upper))]
+    (every? true? (map #(<= %1 %2 %3) lower-site site upper-site))))
+
+(defn distance-offset-to-box
+  "Returns the Euclidean distance between the indicated bounding box (defined by a pair of offsets (arg1)
+and the lattice site referenced by an offset (arg2)."
+  [image offset [lower upper]]
+  (let [[lower-site upper-site offset-site] (map #(get-site-of-offset image %) (list lower upper offset))]
+    (Math/sqrt (apply + (map #(square (max 0 (- %1 %2) (- %2 %3))) lower-site offset-site upper-site)))))
+
+;;; Obsoleted by ctree-contains-offset-at-site?
+#_(defn ctree-contains-offset?
   "Returns true if the ctree contains the indicated intensity-offset pair"
   [ctree intensity offset]
   (cond (empty? ctree) false,
-		(< intensity (:intensity ctree)) false,
-		(= intensity (:intensity ctree)) (contains? (:offsets ctree) offset),
-		:else (some #(ctree-contains-offset? % intensity offset) (:children ctree))))
+        (< intensity (:intensity ctree)) false,
+        (= intensity (:intensity ctree)) (contains? (:offsets ctree) offset),
+        :else (some #(ctree-contains-offset? % intensity offset) (:children ctree))))
+
+(defn ctree-contains-offset-at-site?
+  "Returns true if the ctree contains the indicated intensity-offset pair"
+  [image ctree intensity offset]
+  (let [site (get-site-of-offset image offset)]
+    (loop [ctrees (list ctree)]
+      (if (empty? ctrees)
+        false
+        (let [next-tree (first ctrees)]
+          (cond  (and (= intensity (:intensity next-tree)) (contains? (:offsets next-tree) offset)) true,
+                 (< intensity (:intensity next-tree)) (recur (rest ctrees)),
+                 (and (:box ctree) (not (site-inside-box? image site (:box ctree)))) (recur (rest ctrees)),
+                 :else (recur (concat (remove nil? (:children next-tree)) (rest ctrees)))))))))
+
+(defn merge-boxes
+  "Merge the two given bounding boxes: A new bounding box is returned that contains b1 and b2."
+  [image b1 b2]
+  (let [[l1 u1]  (map #(get-site-of-offset image %) b1)
+        [l2 u2]  (map #(get-site-of-offset image %) b2)
+        min-site (vec (map #(min %1 %2) l1 l2))
+        max-site (vec (map #(max %1 %2) u1 u2))]
+    (vec (map #(get-offset-of-site image %) (list min-site max-site)))))
 
 (defn merge-ctrees
   "Creates a new ctree created by merging the two indicated ctrees, indicated that the components
 represented by each unite at the minimum intensity of the two. Note that the function is symmetric."
   ;; [ct1 ct2]
-  [{i1 :intensity set1 :offsets n1 :size m1 :mean v1 :variance e1 :energy ch1 :children :as ct1}
-   {i2 :intensity set2 :offsets n2 :size m2 :mean v2 :variance e2 :energy ch2 :children :as ct2}]
+  [image
+   {i1 :intensity set1 :offsets n1 :size m1 :mean v1 :variance e1 :energy b1 :box ch1 :children :as ct1}
+   {i2 :intensity set2 :offsets n2 :size m2 :mean v2 :variance e2 :energy b2 :box ch2 :children :as ct2}]
+  {:pre [(map #(or (nil? %) (apply <= %)) (list b1 b2))]
+   :post [(apply <= (:box %))]},
   (dbg :merge-ctrees "~&ct1-> ~a~% ct2-> ~a~%~%" (:size ct1) (:size ct2))
-  (let [
-        ;{i1 :intensity set1 :offsets n1 :size m1 :mean v1 :variance e1 :energy ch1 :children} ct1
-        ;{i2 :intensity set2 :offsets n2 :size m2 :mean v2 :variance e2 :energy ch2 :children} ct2
-        n12 (+ n1 n2)
-        r12 (float (/ n1 n12)) ; interpolation parameter
-        m12 (vector-interp m2 m1 r12) ; r12 = 0 implies m12 = m2
-        v12 (/ (+ (* n1 (+ v1 (vector-square (vector-sub m1 m12))))
-                  (* n2 (+ v2 (vector-square (vector-sub m2 m12))))) n12)
-        e12 (+ e1 e2)]
-	(cond (< i1 i2) (ComponentTreeNode. i1 set1 n12 m12 v12 e12 (conj ch1 ct2)),
-         (= i1 i2) (ComponentTreeNode. i1 (union set1 set2)  n12 m12 v12 e12 (concat ch1 ch2)),
-         :else (ComponentTreeNode. i2 set2 n12 m12 v12 e12 (conj ch2 ct1)))))
-
+  (letfn [(redefine-box-if-nil
+            [box offsets] (if box box (let [x (first offsets)] (vector x x))))]
+    (let [n12 (+ n1 n2)
+          r12 (float (/ n1 n12)) ; interpolation parameter
+          m12 (vector-interp m2 m1 r12) ; r12 = 0 implies m12 = m2
+         ;; v12 (/ (+ (* n1 (+ v1 (vector-square (vector-sub m1 m12))))
+         ;;           (* n2 (+ v2 (vector-square (vector-sub m2 m12))))) n12)
+          v12 (vector-interp v2 v1 r12) ; the weighted second moment
+          e12 (+ e1 e2)
+          b1x (redefine-box-if-nil b1 set1)
+          b2x (redefine-box-if-nil b2 set2)
+          b12 (merge-boxes image b1x b2x)]
+      (cond (< i1 i2) (ComponentTreeNode. i1 set1 n12 m12 v12 e12 b12 (conj ch1 ct2)),
+            (= i1 i2) (ComponentTreeNode. i1 (union set1 set2)  n12 m12 v12 e12 b12 (concat ch1 ch2)),
+            :else (ComponentTreeNode. i2 set2 n12 m12 v12 e12 b12 (conj ch2 ct1))))))
 
 (defn pprint-ctree
   ([stm level {:keys [intensity offsets children] :as ctree}]
@@ -121,28 +176,31 @@ connected). Pixel intensities below min-intensity are ignored."
                 [ctrees offset]
                 (let [neighbors (get-bright-neighbors offset)
                       intensity (get-pixel image offset)
-                      mean (get-position-of-site image (get-site-of-offset image offset))]
+                      site (get-site-of-offset image offset)
+                      scatter (flat-vector-auto-product site)]
                   (dbg :make-ctree-cc "active-sets-> ~a, offset-> ~a:~%" ctrees offset)
                   ;; In the loop, current-set is the component that contains offset. The other-sets
-                  ;; is a list of components (taken from open-sets) that are not adjacent to offset.
+                  ;; is a list of components (taken from open-sets) that are
+                  ;; not adjacent to offset. 
                   (loop [open-roots ctrees,
                          local-root (ComponentTreeNode. intensity
                                                         (set (list offset))
                                                         1 
-                                                        mean
-                                                        0.0 
+                                                        site  ; the mean
+                                                        scatter ; the 2nd moment of the site vector
                                                         intensity
-                                                        nil),
-                         
+                                                        nil   ; initial bounding box.
+                                                        nil   ; initial children
+                                                        ),
                          other-roots nil]
                     (if (empty? open-roots)
                       (let [value (conj other-roots local-root)]  ; here the let facilitates the following side effect.
                         (dbg-indent :make-ctree-cc 1 "returning ~a ~%" value)
                         value)
                       (let [s (first open-roots)]
-                        (if (some #(ctree-contains-offset? s (first %) (second %)) neighbors )
+                        (if (some #(ctree-contains-offset-at-site? image s (first %) (second %)) neighbors )
                           (do (dbg :make-ctree-cc "offset ~a adjoins  ~s. (neighbors= ~a)~%" offset s neighbors)
-                              (recur (rest open-roots) (merge-ctrees local-root s) other-roots))
+                              (recur (rest open-roots) (merge-ctrees image local-root s) other-roots))
                           (do (dbg :make-ctree-cc "offset ~a disjoins ~s. (neighbors= ~a)~%" offset s neighbors)
                               (recur (rest open-roots) local-root (conj other-roots s)))))))))]
          (loop [ct nil b bins]
@@ -172,8 +230,13 @@ connected). Pixel intensities below min-intensity are ignored."
 (defrecord NodeSummary [size mean variance energy])
 
 (defn make-summary
-  [ctree]
-  (NodeSummary. (:size ctree) (:mean ctree) (:variance ctree) (:energy ctree)))
+  [image ctree]
+  (NodeSummary. (:size ctree)
+                (scale-site image (:mean ctree))
+                (vec (map #(* %1 %2)
+                          (vector-sub (:variance ctree) (flat-vector-auto-product (:mean ctree)))
+                          (flat-vector-auto-product (get-scale-factors image))))
+                (:energy ctree)))
 
 (defn print-distance-table
   [vecs]

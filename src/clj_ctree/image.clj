@@ -43,7 +43,7 @@ along each coordinate, beginning with cols, rows, layers, frames, etc.")
   (get-dimensionality [this] "Returns the raster dimensionality.")
   (get-offset-of-site [this site] "Returns the raster offset of the indicated site vector.")
   (get-site-of-offset [this offset] "Returns the site vector of the indicated offset.")
-  (get-position-of-site [this site] "Returns the true spatial coordinates of a raster site.")
+  (scale-site [this site] "Returns the true physical coordinates of a raster site (e.g., microns.")
   )
 
 ;; Higher level functions based on ImageAccess
@@ -53,6 +53,11 @@ where n denotes the dimensionality of the image, (get-pixel-site image site)
 returns the intensity of the indicated pixel."
   [image site]
   (get-pixel image (get-offset-of-site image site)))
+
+(defn get-scale-factors
+  "Returns the scale factor for each dimension."
+  [image]
+  (scale-site image (vec (take (get-dimensionality image) (repeat 1)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Image2d
@@ -81,7 +86,7 @@ returns the intensity of the indicated pixel."
                       (let [r (int (/ offset cols))
                             c (rem offset cols)]
                         (vector c r)))
-  (get-position-of-site [this site] site)
+  (scale-site [this site] site)
   )
 
 ;;; Constructors
@@ -121,7 +126,7 @@ returns the intensity of the indicated pixel."
                             r (int (/ (- offset (* l rows cols)) rows))
                             c (int (- offset (* rows (+ r (* cols l)))))]
                         (vector c r l)))
-  (get-position-of-site [this site] site)
+  (scale-site [this site] site)
   )
 
 ;; Constructors
@@ -617,7 +622,7 @@ of integers."
                       (with-dimension-products-site-to-offset dimension-products site))
   (get-site-of-offset [{:keys [dimension-products] :as this} offset]
                       (with-dimension-products-offset-to-site dimension-products offset))
-  (get-position-of-site [this site] site)
+  (scale-site [this site] site)
   )
 
 
@@ -636,7 +641,7 @@ of integers."
   (get-pixel [{:keys [dimension-products stack] :as this} offset]
              (let [[slice-index slice-offset] (floor-rem offset (nth dimension-products 2))]
                #_(dbg :ImageStack "slice-index = ~a, slice-offset = ~a~%" slice-index slice-offset)
-               (int (bit-and (aget (nth stack slice-index) slice-offset) 0xff))))
+               (int (bit-and (aget (nth stack slice-index) slice-offset) 0xff)))),
   
   (get-size [{:keys [dimensions] :as this}]
             (apply * dimensions))
@@ -648,7 +653,7 @@ of integers."
                       (with-dimension-products-site-to-offset dimension-products site))
   (get-site-of-offset [{:keys [dimension-products] :as this} offset]
                       (with-dimension-products-offset-to-site dimension-products offset))
-  (get-position-of-site [{:keys [voxelSize] :as this} site] (vec (map * site voxelSize)))
+  (scale-site [{:keys [voxelSize] :as this} site] (vec (map * site voxelSize)))
 )
 
 
