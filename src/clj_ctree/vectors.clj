@@ -1,27 +1,29 @@
-;;; Copyright 2011 Robert R. Snapp
+;;; vectors.clj is part of blobify.
 ;;;
-;;; This file is part of clj-ctree.
+;;; blobify is a clojure program that indentifies and analyzes connected
+;;; components in grayscale images and image stacks using component trees.
 ;;;
-;;; clj-ctree is free software: you can redistribute it and/or modify
-;;; it under the terms of the GNU General Public License as published
-;;; by the Free Software Foundation, either version 3 of the License,
-;;; or (at your option) any later version.
+;;; Copyright (C) 2011 Robert R. Snapp
 ;;;
-;;; clj-ctree is distributed in the hope that it will be useful, but
-;;; WITHOUT ANY WARRANTY; without even the implied warranty of
-;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-;;; General Public License for more details.
+;;; This program is free software: you can redistribute it and/or modify
+;;; it under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation, either version 3 of the License, or
+;;; (at your option) any later version.
+;;;
+;;; This program is distributed in the hope that it will be useful,
+;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;; GNU General Public License for more details.
 ;;;
 ;;; You should have received a copy of the GNU General Public License
-;;; along with clj-ctree.  If not, see <http://www.gnu.org/licenses/>.
-;;;
-;;;-------------------------------------------------------------------
-;;;
+;;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 ;;; This namespace provides vector and matrix utility functions used
-;;; by other parts of clj-ctree.
+;;; by other parts of agglomerate.
 
 
-(ns clj-ctree.vectors)
+(ns agglomerate.vectors)
 
 ;;; Data representation.
 ;;;
@@ -134,6 +136,10 @@
   [v]
   (Math/sqrt (vector-square v)))
 
+(defn square-distance
+  "Returns the square of the Euclidean distance between v1 and v2."
+  [v1 v2]
+  (vector-square (vector-sub v1 v2)))
 
 (defn l2-distance
   "Returns the L2 or Euclidean distance between vectors v1 and v2."
@@ -159,3 +165,12 @@ moments and covariance matrics. By 'flat' we mean that the upper-triangluar matr
 is represented as a single vector of dimension n(n+1)/2, where n is the dimension of v."
   [v]
   (vec (apply concat (map #(for [x %2] (* %1 x)) v (take (count v) (iterate rest v))))))
+
+(defn interset-distance
+  "Evaluates the distance between two collections of vectors."
+  [a b]
+  (Math/sqrt (apply min
+                    (apply concat
+                           (for [x a]
+                             (for [y b]
+                               (square-distance x y)))))))
