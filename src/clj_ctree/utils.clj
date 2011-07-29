@@ -1,3 +1,24 @@
+;;; utils.clj is part of the source code for blobify.
+
+;;; blobify is a clojure program that indentifies and analyzes connected
+;;; components in grayscale images and image stacks using component trees.
+;;;
+;;; Copyright (C) 2011 Robert R. Snapp
+;;;
+;;; This program is free software: you can redistribute it and/or modify
+;;; it under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation, either version 3 of the License, or
+;;; (at your option) any later version.
+;;;
+;;; This program is distributed in the hope that it will be useful,
+;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;; GNU General Public License for more details.
+;;;
+;;; You should have received a copy of the GNU General Public License
+;;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+;;;
 ;;; Contains functions that extend the power of clojure, for peforming a
 ;;; variety of tasks:
 ;;;
@@ -50,7 +71,7 @@
 ;;; * get-filename-root
 ;;;
 
-(ns clj-ctree.utils
+(ns blobify.utils
   (:use [clojure.set :only (difference union)]
 		[clojure.contrib.pprint]))
 
@@ -372,3 +393,59 @@ the second being the remainder of the quotient."
   "Computes the square of the argument."
   [x]
   (* x x))
+
+;;; Some AI search methods.
+(defn tree-search
+  "A general function for performing a tree-search, based on the function of the same name
+in Peter Norvig's  _Paradigms_of_Artificial_Intelligence_Programming. Unlike Norvig's
+implementation, here we use a loop-recur pair to implement the recursion. Consequently,
+the input argument states is replaced by initial-state:
+
+initial-state represents the initial node of the search, usually the root node of the
+              search tree.
+goal?         is a function that returns true if and only if the goal of the search has been
+              achieved.
+successors    is a function of a single argument that returns a list of successor states of its
+              argument.
+combiner      is a function of two list arguments new states, followed by old states. It returns
+              a new list of states in the order determined by the search strategy."
+  [initial-state goal? successors combiner]
+  (loop [states (list initial-state)]
+    (if (empty? states)
+      nil ; Search failed to find a goal.
+      (let [next (first states)]
+        (if (goal? next)
+          next
+          (recur (combiner (successors next) (rest states))))))))
+
+
+(defn depth-first-tree-search
+  [start goal? successors]
+  (tree-search start goal? successors concat))
+
+(defn breadth-first-tree-search
+  [start goal? successors]
+  (tree-search start goal? successors #(concat %2 %1)))
+
+#_(defn graph-search
+  [initial-state goal? successors combiner]
+  (loop [open-nodes (list initial-state) closed-nodes #{}]
+    (if (empty? open-nodes)
+      nil
+      (let [next (first open-nodes)]
+        (if (goal? next)
+          next
+          (let [closed-nodes (conj closed-nodes next)
+                children (filter (partial (comp not contains?) closed-nodes)
+                                 (successors next))]
+            (recur (combiner children (rest open-nodes)) closed-nodes)))))))
+
+;;; In order to test tree search, we need to build a tree:
+(defrecord BinaryTreeNode [value left right])
+
+(defn make-binary-tree
+  [n]
+  (let [tree (BinaryTreeNode. 1 nil nil) level 0]
+    (if (= level n)
+      tree
+      )))
