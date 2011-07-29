@@ -12,21 +12,35 @@
 ;;; Created by Robert R. Snapp, Copyright (c) 2010-2011.
 ;;;
 
-(ns clj-ctree.image
+(ns blobify.image
   (:import (java.awt.image BufferedImage DataBufferByte PixelGrabber WritableRaster)
            (java.awt Color Graphics Dimension)
            (javax.swing JPanel JFrame JLabel)
+           (java.util.concurrent Executors)
            (ij ImagePlus)
            (ij.io Opener)
            (org.imagearchive.lsm.reader Reader))
-  (:use [clj-ctree.vectors :only
-         (inner-product l-infinity-distance vector-add vector-divide vector-sub vector-square)]
-        [clj-ctree.polynomial :only (interpolate multi-horner)]
-        [clj-ctree.utils :only (dbg debug floor-rem int-to-ubyte ubyte-to-int
-                                    get-directory get-filename pos-if seq2redundant-map)]
+  (:use [blobify.vectors :only (inner-product
+                                  l-infinity-distance
+                                  vector-add
+                                  vector-divide
+                                  vector-sub
+                                  vector-square)]
+        [blobify.polynomial :only (interpolate multi-horner)]
+        [blobify.utils :only (dbg
+                                debug
+                                floor-rem
+                                int-to-ubyte
+                                ubyte-to-int
+                                get-directory
+                                get-filename
+                                get-filename-ext
+                                pos-if
+                                seq2redundant-map)]
         [clojure.contrib.pprint :only (cl-format)]
-        [clojure.contrib.math :only (abs)]
-        [clojure.contrib.generic.math-functions :only (pow)]))
+        [clojure.contrib.math :only (abs ceil)]
+        [clojure.contrib.generic.math-functions :only (pow)]
+        [clojure.contrib.combinatorics :only (cartesian-product)]))
 
 #_(declare get-pixel)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -214,7 +228,7 @@ returns the intensity of the indicated pixel."
    [i1, i2, i3, ..., in], this function returns the offset of the indicated
    array element i1 + d1*i2 + d1*d2*i3 + ... + d1*d2*...*d(n-1)*in."
   [dimensions site]
-  (multi-horner site (pop dimensions)))  ; defined in clj-ctree.polynomial
+  (multi-horner site (pop dimensions)))  ; defined in blobify.polynomial
 
 (defn with-dimensions-offset-to-site
   "Given a vector of array dimensions [d1, d2, ..., dn] this function returns
@@ -628,19 +642,19 @@ of integers."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;
-;;; ImageStack mantains multidimensional images as an array of rasters,
+;;; StackedImage mantains multidimensional images as an array of rasters,
 ;;; each of the latter being a bytearray that represents a 2d image.
 ;;; The voxelSizne is a three-vector that describes the voxel dimensions
 ;;; in microns.
 
-(defrecord ImageStack [path voxelSize dimensions dimension-products stack])
+(defrecord StackedImage [path voxelSize dimensions dimension-products stack])
 
-(debug :ImageStack)
-(extend-type ImageStack
+(debug :StackedImage)
+(extend-type StackedImage
   ImageAccess
   (get-pixel [{:keys [dimension-products stack] :as this} offset]
              (let [[slice-index slice-offset] (floor-rem offset (nth dimension-products 2))]
-               #_(dbg :ImageStack "slice-index = ~a, slice-offset = ~a~%" slice-index slice-offset)
+               #_(dbg :StackedImage "slice-index = ~a, slice-offset = ~a~%" slice-index slice-offset)
                (int (bit-and (aget (nth stack slice-index) slice-offset) 0xff)))),
   
   (get-size [{:keys [dimensions] :as this}]
@@ -659,8 +673,8 @@ of integers."
 
 (def m568 "/Users/snapp/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
 (def m568c "/Users/snapp/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
-(def m567 "/Users/snapp/data/cellNuclei/ctree/tif/m567.tif")
-(def m588 "/Users/snapp/data/cellNuclei/ctree/tif/m588.tif")
+(def m567 "/Users/snapp/data/cellNuclei/ctree/tif/m567_2kk.tif")
+(def m588 "/Users/snapp/data/cellNuclei/ctree/tif/m588_1h.tif")
 
 (defn openlsm
   "Open the lsm image indicated by path, and return the java ImagePlus object."
@@ -677,9 +691,10 @@ of integers."
     (cl-format true "Height=~a, Width=~a, StackSize=~a~%" height width size)
     imageplus))
 
+
 ;; Can we get the physical voxel dimensions?
-(defn open-stack-image
-  "Open the image stack indicated by path (usually a tif file), and return an ImageStack record."
+#_(defn open-stack-image
+  "Open the image stack indicated by path (usually a tif file), and return an StackedImage record."
   [path init-slice delta]
   (let [opener (Opener.)
         imageplus (. opener openImage path)
@@ -693,7 +708,42 @@ of integers."
         dims [width height (count indices)]
         dp (dimensions-to-dimension-products dims)
         stack (vec (map #(.. imageStack  (getProcessor %) getPixels) indices))]
-    (ImageStack. path voxelSize dims dp stack)))
+    (StackedImage. path voxelSize dims dp stack)))
+
+(defn access-lsm-file
+  "Returns an imageplus object that contains the image data referenced by the lsm file at path."
+  [path]
+  (let [reader (Reader.)
+        thumbnail false
+        verbose true
+        directory (get-directory path)
+        filename (get-filename path)]
+    (. reader open directory filename verbose thumbnail)))
+
+(defn access-tif-file
+  "Returns an imageplus object that contains the image data referenced by the tif file at path."
+  [path]
+  (let [opener (Opener.)]
+    (. opener openImage path)))
+
+(defn open-stack-image
+  "Open the image stack indicated by path (usually a tif or lsm file), and return an StackedImage record."
+  [path init-slice delta]
+  (let [imageplus (if (= (get-filename-ext path) ".lsm")
+                    (access-lsm-file path)
+                    (access-tif-file path))
+        height (. imageplus getHeight)
+        width (. imageplus getWidth)
+        cal (. imageplus getCalibration)
+        voxelSize (vector (. cal pixelWidth) (. cal pixelHeight) (. cal pixelDepth))
+        imageStack (. imageplus getImageStack)
+        imageStackSize (. imageStack getSize)
+        indices (range (inc init-slice) imageStackSize delta)
+        dims [width height (count indices)]
+        dp (dimensions-to-dimension-products dims)
+        stack (vec (map #(.. imageStack  (getProcessor %) getPixels) indices))
+        ]
+    (StackedImage. path voxelSize dims dp stack)))
 
 ;;;================
 ;;; Image Analysis
@@ -705,15 +755,49 @@ of integers."
   [image]
   (apply max (map #(get-pixel image %) (range (get-size image)))))
 
-(defn histogram
-  "Creates a histogram of an image."
-  [image]
-  (loop [vals (map #(get-pixel image %) (range (get-size image)))
-         hist (vec (repeat 256 0))]
-    (if (empty? vals)
-      hist
-      (let [intensity (max 0 (min 255 (first vals)))]
-        (recur (rest vals) (assoc hist intensity (inc (nth hist intensity))))))))
+(defn get-offsets
+  "Returns a sequence of raster offsets that parameterize the specified image and region of interest (roi)."
+  ([image]
+     (range (get-size image)))
+  ([image roi]
+     (let [[min-site max-site] (map (partial get-site-of-offset image) roi)
+           inc-max-site (map inc max-site)]
+       (map (partial get-offset-of-site image)
+         (apply cartesian-product (map range min-site inc-max-site))))))
+  
+
+(let [nthreads (.availableProcessors (Runtime/getRuntime))
+      vals-per-thread 1024]
+  (letfn [(serial-histogram [nbins vals]
+            (loop [hist (vec (replicate nbins 0)) vals vals]
+              (if (empty? vals)
+                hist
+                (let [x (max 0 (min (dec nbins) (int (first vals))))]
+                  (recur (assoc hist x (inc (nth hist x)))
+                         (rest vals))))))
+          (parallel-histogram [nbins vals]
+            (let [hist (vec (map ref (replicate nbins 0)))
+                  pool (Executors/newFixedThreadPool nthreads)
+                  tasks (map (fn [s]
+                               (fn []
+                                 (dorun
+                                  (for [x s]
+                                    (dosync
+                                     (commute (hist (max 0 (min (dec nbins) x))) inc))))))
+                             (partition-all (ceil (/ (count vals) vals-per-thread)) vals))]
+              (doseq [future (.invokeAll pool tasks)]
+                (.get future))
+              (.shutdown pool)
+              (map deref hist)))]
+    (defn histogram
+      "Creates a histogram of an image. With a single argument [image], a histogram of the entire image is
+returned. With two arguments [image roi], where roi represents a 2-vector of raster offsets, then the
+histogram is evaluated over the inclusive region of interest. "
+      ([image]
+         (serial-histogram 256 (pmap (partial get-pixel image) (get-offsets image))))
+      ([image roi]
+         (serial-histogram 256 (pmap (partial get-pixel image) (get-offsets image roi)))))))
+
 
 (defn normalize
   "Normailizes a histogram (or other nonnegative vector) by dividing each entry by the sum."
@@ -733,9 +817,12 @@ of integers."
        (lazy-seq (cons total (successive-sums (+ total (first nums)) (rest nums)))))))
 
 (defn cumulative-histogram
-  [image]
-  (let [unh (successive-sums (histogram image))]
-    (vector-divide unh (float (last unh)))))
+  ([image]
+     (let [unh (successive-sums (histogram image))]
+       (vector-divide unh (float (last unh)))))
+  ([image roi]
+     (let [unh (successive-sums (histogram image roi))]
+       (vector-divide unh (float (last unh))))))
 
 (defn inverse-cumulative-histogram
   "Inverse histogram accepts two arguments, a cumulative histogram ch (arg1) and a number from
