@@ -1,23 +1,44 @@
+;;; core.clj is part of blobify.
+;;; blobify is a clojure program that indentifies and analyzes connected
+;;; components in grayscale images and image stacks using component trees.
+;;;
+;;; Copyright (C) 2011 Robert R. Snapp
+;;;
+;;; This program is free software: you can redistribute it and/or modify
+;;; it under the terms of the GNU General Public License as published by
+;;; the Free Software Foundation, either version 3 of the License, or
+;;; (at your option) any later version.
+;;;
+;;; This program is distributed in the hope that it will be useful,
+;;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;; GNU General Public License for more details.
+;;;
+;;; You should have received a copy of the GNU General Public License
+;;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 ;;; The implementation of the component tree for gray-level images.
 
-(ns clj-ctree.core
+(ns blobify.core
   (:import (java.awt.image BufferedImage)
            (java.awt Color Graphics Dimension)
            (javax.swing JPanel JFrame JLabel)
            (ij ImagePlus)
            (org.imagearchive.lsm.reader Reader))
-  (:use  [clj-ctree.image :only (get-dimensionality
+  (:use  [blobify.image :only (get-dimensionality
 								 get-filtered-neighborhood
 								 get-neighborhood-mask
 								 get-pixel
                          get-pixel-site
                          get-offset-of-site
+                         get-offsets
                          get-scale-factors
                          get-site-of-offset
 								 get-size
                          scale-site
 								 with-image-get-neighboring-offsets)]
-         [clj-ctree.utils :only (dbg
+         [blobify.utils :only (dbg
  								 dbg-indent
                          debug
 								 least-above
@@ -25,12 +46,14 @@
                          square
                          tree-select
                          when-dbg)]
-         [clj-ctree.vectors :only (flat-vector-auto-product
-                                   l2-distance
-                                   vector-sub
-                                   vector-interp
-                                   vector-square)]
-         [clj-ctree.graphics :only (get-indexed-rgb)]
+         [blobify.vectors :only (flat-vector-auto-product
+          l2-distance
+          interset-distance
+          square-distance
+          vector-sub
+          vector-interp
+          vector-square)]
+         [blobify.graphics :only (get-indexed-rgb)]
 		 [clojure.set :only (intersection
 							 union)]
 		 [clojure.contrib.pprint :only (cl-format)]
@@ -41,9 +64,13 @@
   "Given an image (arg1) bin-by-intensity returns an intensity map of the image, in which
 each intensity value is represented by a key (sorted in decreasing order), followed by a list
 of offsets corresponding to each intensity value."
-  [image]
-  (letfn [(key-value-pair [x] (vector (get-pixel image x) x))]
-	(seq2redundant-map (range (get-size image)) key-value-pair conj :sort-down)))
+  ([image]
+     (letfn [(key-value-pair [x] (vector (get-pixel image x) x))]
+       (seq2redundant-map (get-offsets image) key-value-pair conj :sort-down)))
+  ([image roi]
+     (letfn [(key-value-pair [x] (vector (get-pixel image x) x))]
+       (seq2redundant-map (get-offsets image roi) key-value-pair conj :sort-down))))
+
 
 ;; (debug :make-ctree-gbn) ; remove/insert leading comment to toggle debugging
 ;; (debug :make-ctree-cc) ; remove/insert leading comment to toggle debugging
@@ -56,6 +83,10 @@ of offsets corresponding to each intensity value."
 ;; box represents a boudning box and should be a vector of the form [lower-offset upper-offset]
 
 (defrecord ComponentTreeNode [intensity offsets size mean variance energy box children])
+
+;;; Note that many of the functions below require the image as an input
+;;; parameter. The dimension-products field of each image record is used to
+;;; convert raster offsets into site lattice coordinates, and vice versa.
 
 (defn offset-inside-box?
   "Returns true if and only if the lattice site referenced by offset in the current image lies
@@ -71,12 +102,6 @@ lies within the closed bounding box defined by the lower and upper offset vector
   (let [[lower-site upper-site] (map #(get-site-of-offset image %) (list lower upper))]
     (every? true? (map #(<= %1 %2 %3) lower-site site upper-site))))
 
-(defn distance-offset-to-box
-  "Returns the Euclidean distance between the indicated bounding box (defined by a pair of offsets (arg1)
-and the lattice site referenced by an offset (arg2)."
-  [image offset [lower upper]]
-  (let [[lower-site upper-site offset-site] (map #(get-site-of-offset image %) (list lower upper offset))]
-    (Math/sqrt (apply + (map #(square (max 0 (- %1 %2) (- %2 %3))) lower-site offset-site upper-site)))))
 
 ;;; Obsoleted by ctree-contains-offset-at-site?
 #_(defn ctree-contains-offset?
@@ -145,34 +170,37 @@ represented by each unite at the minimum intensity of the two. Note that the fun
   ([stm ctree] (pprint-ctree stm 0 ctree))
   ([ctree] (pprint-ctree true 0 ctree)))
 
+;; In the following, a component is implemented as a ctree. Components that include 
+;; pixels with intensities greater than or equal to that of the indicated offset (arg2)
+;; will be collected and returned as a list of ctree-nodes. The function begins with a list
+;; of components, called ctrees (arg1), that are defined for the minimum pixel
+;; intensity greater than that of offset (arg2). (For the initial iteration, ctrees (arg1)
+;; is set to nil.) The main body of make-ctree uses reduce to merge components that
+;; become topologically adjacent as the threshold is decreased. collect-compoonents
+;; scans the list of active ctrees, merging those that contain a topological neighbor of
+;; the current offset, and returns the result, as a list of ctrees.
+
 (defn make-ctree
   "Given an Image (arg1), an integer hamming radius (arg2), and a minimum intensity
 threhsold, make-ctree generates a component tree for the image assuming the topology specified
 by the second argument (adjacent lattice sites within the hamming radius are topologically
 connected). Pixel intensities below min-intensity are ignored."
-  ([image max-hamming-radius min-intensity]
-     (let [bins (filter #(>= (first %) min-intensity) (bin-by-intensity image))
+  ([image max-hamming-radius min-intensity roi]
+     (printf "Sorting %d %d-dimensional pixels into intentity bins ... "
+             (get-size image) (get-dimensionality image))
+     (let [bins (filter #(>= (first %) min-intensity) (bin-by-intensity image roi))
            mask (get-neighborhood-mask (get-dimensionality image) max-hamming-radius)
            k-values (keys bins)]
+       (print "... done.\n\n")
        (letfn [(get-bright-neighbors	; return a list of offsets with intensities that are greater
-                [offset]				; than or equal to that of the indicated offset (arg1).
+                 [offset]				   ; than or equal to that of the indicated offset (arg1).
                 (let [threshold (get-pixel image offset)
                       neighbors (map #(vector (get-pixel image %) %)
                                      (with-image-get-neighboring-offsets image mask offset))
                       brights (filter #(<= threshold (first %)) neighbors)]
                   (dbg :make-ctree-gbn "(get-bright-neighbors ~a) => ~s~%" offset brights)
                   brights))
-			   
-               ;; In the following, a component is implemented as a ctree. Components that include 
-               ;; pixels with intensities greater than or equal to that of the indicated offset (arg2)
-               ;; will be collected and returned as a list of ctree-nodes. The function begins with a list
-               ;; of components, called ctrees (arg1), that are defined for the minimum pixel
-               ;; intensity greater than that of offset (arg2). (For the initial iteration, ctrees (arg1)
-               ;; is set to nil.) The main body of make-ctree uses reduce to merge components that
-               ;; become topologically adjacent as the threshold is decreased. collect-compoonents
-               ;; scans the list of active ctrees, merging those that contain a topological neighbor of
-               ;; the current offset, and returns the result, as a list of ctrees.
-               (collect-components
+               (collect-components    ; merge ctrees that contain a neighbor of offset
                 [ctrees offset]
                 (let [neighbors (get-bright-neighbors offset)
                       intensity (get-pixel image offset)
@@ -194,23 +222,23 @@ connected). Pixel intensities below min-intensity are ignored."
                                                         ),
                          other-roots nil]
                     (if (empty? open-roots)
-                      (let [value (conj other-roots local-root)]  ; here the let facilitates the following side effect.
-                        (dbg-indent :make-ctree-cc 1 "returning ~a ~%" value)
-                        value)
+                      (let [consolidated-ctrees (conj other-roots local-root)]  ; here the let facilitates the following side effect.
+                        (dbg-indent :make-ctree-cc 1 "returning ~a ~%" consolidated-ctrees)
+                        consolidated-ctrees)
                       (let [s (first open-roots)]
                         (if (some #(ctree-contains-offset-at-site? image s (first %) (second %)) neighbors )
                           (do (dbg :make-ctree-cc "offset ~a adjoins  ~s. (neighbors= ~a)~%" offset s neighbors)
                               (recur (rest open-roots) (merge-ctrees image local-root s) other-roots))
                           (do (dbg :make-ctree-cc "offset ~a disjoins ~s. (neighbors= ~a)~%" offset s neighbors)
                               (recur (rest open-roots) local-root (conj other-roots s)))))))))]
+         (printf "  Intensity \t    Count \t  Components:\n")
          (loop [ct nil b bins]
            (when-dbg :make-ctree (dorun (map #(pprint-ctree %) ct)))
            (if (empty? b)
              ct
              (let [[k offsets] (first b),
-                   k-sets (reduce #(collect-components %1 %2)
-                                  ct
-                                  offsets)]
+                   k-sets (reduce #(collect-components %1 %2) ct offsets)]
+               (printf "%10d \t %10d \t %10d\n" k (count offsets) (count k-sets))
                (recur k-sets (rest b)))))))))
 
 (defn chop-intensity
@@ -249,8 +277,235 @@ connected). Pixel intensities below min-intensity are ignored."
                           (printf "%8.3f" (l2-distance v0 (nth vecs j))))))
                (printf "\n"))))))
 
+(defn get-ctree-offsets
+  "Returs a set that contains all of the raster offsets contained in the indicated ctree."
+  [ct]
+  (loop [offsets nil ctrees (list ct)]
+    (if (empty? ctrees)
+      offsets
+      (let [next-tree (first ctrees)]
+        (recur (concat offsets (:offsets next-tree)) (concat (:children next-tree) (rest ctrees)))))))
+
+;;; Distance functions
+;;; FIXME: This is just an A* search. It should be implemented in a more general and reusable fashion.
+
+
+
+(defn distance-box-to-box
+  "Returns the Euclidean distance between the bounding boxes defined with respect to the current images.
+Note that each bounding box is defined as a pair-vector of raster offsets, e.g. [l1 h1]."
+  [image [l1 h1] [l2 h2]]
+  (letfn [(projected-distance [a b c d]
+                      (square (max 0 (- c b) (- a d))))]
+    (Math/sqrt (apply + (apply (partial map projected-distance)
+                               (map (partial get-site-of-offset image) [l1 h1 l2 h2]))))))
+
+(defn distance-box-to-offset
+  "Computes and returns the minimum Euclidean distance between the indicated bounding box (defined by a pair of
+offsets (arg1) and the lattice site referenced by an offset (arg2)."
+  [image  [lower upper] offset]
+  (let [[lower-site upper-site offset-site] (map #(get-site-of-offset image %) (list lower upper offset))]
+    (Math/sqrt (apply + (map #(square (max 0 (- %1 %2) (- %2 %3))) lower-site offset-site upper-site)))))
+
+(defn distance-box-to-offsets
+  "Computes and returns the minimum Euclidean distance between a bounding box and the set of raster sites
+referenced by a set of raster offsets."
+  [image box offsets]
+  (letfn [(distance2-boxsites-offset
+            [[lo-site hi-site] offset]
+            (apply + (map #(square (max 0 (- %1 %2) (- %2 %3)))
+                          lo-site (get-site-of-offset image offset) hi-site)))]
+          (Math/sqrt (apply min
+                 (map (partial distance2-boxsites-offset
+                               (map (partial get-site-of-offset image) box))
+                      offsets)))))
+
+(defn distance-offsets-to-offsets
+  "Computes and returns the minimum Euclidean distance between two sets of lattice sites, indicated
+by the corresponding sets of raster offsets."
+  [image set1 set2]
+  (apply interset-distance
+         (map #(map (partial get-site-of-offset image) %)
+              [set1 set2])))
+
+(defn distance-offsets-to-offset
+  [image set1 offset]
+  (Math/sqrt
+   (apply min
+          (map #(apply square-distance
+                       (map (partial get-site-of-offset image)
+                            (list offset %))) set1))))
+
+(defn distance-node-to-node
+  "Evaluates a lower-bound to the distance between the two indicated ctree nodes. Whenever possible,
+the bounding box is used in place of spatial locations of the raster offsets."
+  [image ct1 ct2]
+  (if (:box ct1)
+    (if (:box ct2)
+      (distance-box-to-box image (:box ct1) (:box ct2))
+      (distance-box-to-offsets image (:box ct1) (:offsets ct2)))
+    (if (:box ct2)
+      (distance-box-to-offsets image (:box ct2) (:offsets ct1))
+      (distance-offsets-to-offsets image (:offsets ct1) (:offsets ct2)))))
+
+(defn distance-node-to-offsets
+  "Evaluates a lower-bound to the distance between the two indicated node and the set of
+raster offsets."
+  [image ct1 offsets2]
+  (if (:box ct1)
+    (distance-box-to-offsets image (:box ct1) offsets2)
+    (distance-offsets-to-offsets image (:offsets ct1) offsets2)))
+
+
+
+
+(defn distance-ctree-offset
+  "Computes and returns the minimum Euclidean distance between the indicated ctree (arg2) and offset (arg3)."
+  [image ct offset]
+  (let [d0 (distance-offsets-to-offset image (:offsets ct) offset)]
+    (loop [best-distance d0 candidates (:children ct)]
+      (if (empty? candidates)
+        best-distance
+        (let [next-node (first candidates)
+              new-distance (min best-distance (distance-offsets-to-offset image (:offsets next-node) offset))
+              good-children (filter #(and % (or (nil? (:box %))
+                                                (< (distance-box-to-offset image (:box %) offset) new-distance)))
+                                    (:children next-node))]
+          (recur new-distance (concat good-children (rest candidates))))))))
+
+(defn distance-ctree-offsets
+  "Computes and returns the minimum Euclidean distance between the indicated ctree (arg2) and the lattice
+sites that correspond to the set of raster offsets (arg3)."
+  [image ct1 set2]
+  (apply min (map (partial distance-ctree-offset image ct1) set2)))
+
+
+(defn lower-distance
+  "Returns a lower estimate for the distance between two ctrees."
+  [image ct1 ct2]
+  (if (:children ct1)
+    (if (:children ct2)
+      (distance-box-to-box image ct1 ct2)
+      (distance-box-to-offsets image ct1 (:offsets ct2)))
+    (if (:children ct2)
+      (distance-box-to-offsets image ct2 (:offsets ct1))
+      (distance-offsets-to-offsets image (:offsets ct1) (:offsets ct2)))
+    ))
+
+(defn construct-cross-pairs
+  "Generate the next generation of node pairs, estimating the distance between each pair. Only pairs
+with estimated distances less that the value of best-distance are retained and returned."
+  [image best-distance ct1 ct2]
+  (sort-by #(nth % 0)
+           (filter #(< (nth % 0) best-distance)
+                   (concat (map #(vector (distance-node-to-offsets image % (:offsets ct1))
+                                         (assoc ct1 :children nil) %)
+                                (:children ct2))
+                           (map #(vector (distance-node-to-offsets image % (:offsets ct2))
+                                         % (assoc ct2 :children nil))
+                                (:children ct1))
+                           (for [x1 (:children ct1) x2 (:children ct2)]
+                             (vector (distance-node-to-node image x1 x2) x1 x2))))))
+
+(defn distance-ctree-to-ctree
+  "Computes and returns the minimum Euclidean distance between two image components referenced by two
+component trees (args 2 and 3)."
+  [image ct1 ct2]
+  ;; First get an initial distance.
+  (let [d0 (distance-offsets-to-offsets image (:offsets ct1) (:offsets ct2))]
+    (loop [best-distance d0 candidates (construct-cross-pairs image d0 ct1 ct2)]
+      (if (empty? candidates)
+        best-distance
+        (let [next-candidate (first candidates)
+              a (nth next-candidate 1)
+              b (nth next-candidate 2)
+              d1 (distance-offsets-to-offsets image (:offsets a) (:offsets b))
+              new-candidates (concat (construct-cross-pairs image d1 a b) (filter #(< (nth % 0) d1) (rest candidates)))]
+          (recur d1 (sort-by #(nth % 0) new-candidates)))))))
+
+(defn ctree-distance-bf
+  "Computes the distance between two ctrees. This algorithm inefficiently uses brute force, and
+eventually computes the distances between every heterogeneous pair of lattice sites."
+  [image ct1 ct2]
+  (letfn [(get-sites [ct] (map (partial get-site-of-offset image) (get-ctree-offsets ct)))]
+    (interset-distance (get-sites ct1) (get-sites ct2))))
+
+(defn ctree-distance-inner
+  "Computes the distance between two ctrees, using the bounding-boxes, to branch and bound."
+  [image ct1 ct2 best]
+  (letfn [(get-site [offset] (get-site-of-offset image offset))
+          (get-base-sites [ctree] (map get-site (:offsets ctree)))
+          (distance-base-base [b1 b2] (apply interset-distance (map get-base-sites [b1 b2])))
+          (distance2-boxsites-offset [[lo-site hi-site] offset]
+            (apply + (map #(square (max 0 (- %1 %2) (- %2 %3))) lo-site (get-site offset) hi-site)))
+          (distance-base-box [base [lo hi]]
+            (Math/sqrt (apply min (map (partial distance2-boxsites-offset (vector (get-site lo) (get-site hi)))
+                                       (:offsets base)))))
+          (distance-box-box [[l1 h1] [l2 h2]]
+            (letfn [(projected-distance [a b c d]
+                      (square (max 0 (- c b) (- a d))))]
+              (Math/sqrt (apply + (apply (partial map projected-distance)
+                                          (map get-site [l1 h1 l2 h2]))))))
+          ]
+    (loop [best best subtrees (list ct2)]
+      (if (empty? subtrees)
+        best
+        (let [a1 (first subtrees)]
+          (if (< best (if (:box a1) (distance-box-box (:box ct1) (:box a1)) (distance-base-box a1 (:box ct1))))
+            (recur best (rest subtrees))
+            (recur (min best (distance-base-base ct1 a1)) (concat (:children a1) (rest subtrees)))))))
+    
+    #_(vector (distance-base-base ct1 ct2)
+            (distance-base-box ct1 (:box ct2))
+            (distance-base-box ct2 (:box ct1))
+            (distance-box-box (:box ct1) (:box ct2)))
+
+    ))
+
+(defn ctree-distance
+  [image ct1 ct2]
+  (loop [best 100000000 subtrees (list ct2)]
+    (if (empty? subtrees)
+      best
+      (let [a1 (first subtrees)
+            d1 (ctree-distance-inner image a1 ct1 best)]
+        (if (< best d1)
+          (recur best (rest subtrees))
+          (recur d1 (concat (:children a1) (rest subtrees))))))))
+
+
+(defn box-distance
+  [image ct1 ct2]
+  (letfn [(get-site [offset] (get-site-of-offset image offset))
+          (projected-distance [a b c d]
+            (square (max 0 (- c b) (- a d))))]
+    (Math/sqrt (apply + (apply (partial map projected-distance)
+                               (map get-site (mapcat :box [ct1 ct2])))))))
+
+(defn root-distance
+  [image ct1 ct2]
+  (letfn [(get-site [offset] (get-site-of-offset image offset))]
+    (apply interset-distance (map :offsets [ct1 ct2]))))
+
+(defn bb-distance
+  "Uses a branch and bound heuristic to compute the Euclidean distance between the components
+rooted at ComponentTreeNodes ct1 and ct2."
+  [image ct1 ct2]
+  (letfn [(node-distance [a b] (root-distance image a b)) ]
+  (let [d0 (node-distance ct1 ct2)
+        [ch1 ch2] (vec (map :children [ct1 ct2]))
+        pairs (sort-by first <
+                       (filter #(< (first %) d0)
+                               (for [x ch1 y ch2]
+                                 (vector (box-distance x y) (vector x y)))))]
+    (loop [d d0 candidates pairs]
+      (if (empty? candidates)
+        d
+        (let [greedy-pick (first candidates)
+              d1 (apply node-distance (second greedy-pick))]
+          (if (< d1 d)
+            (recur d1 (concat (rest candidates))))))))))
 ;(debug :render-ctree)
-  
 
 (defn render-ctree-2d
   "Displays the 2d image (arg1) in a JFrame GUI, using a grayscale, along with each
@@ -351,6 +606,6 @@ color."
 
 ;;; Tests
 
-(deftest clj-ctree.image-test
-  (def img2d (clj-ctree.image/make-blobby-image-2d 16))
-  (def img3d (clj-ctree.image/make-blobby-image-3d 8)))
+(deftest blobify.image-test
+  (def img2d (blobify.image/make-blobby-image-2d 16))
+  (def img3d (blobify.image/make-blobby-image-3d 8)))
