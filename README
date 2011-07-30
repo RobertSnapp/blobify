@@ -1,0 +1,43 @@
+ * About this Software
+
+blobify is a clojure application that identifies and analyzes connected components in
+graylevel images and image stacks. The program works with image files in both tif and
+lsm formats.
+
+(C) 2011 Robert R. Snapp
+
+
+* Usage
+
+To run blobify, you will need:
+
+1) JDK 1.6+ from Sun/Oracle.
+2) blobify-standalone.jar (contains clojure, clojure-contrib, and other jars)
+
+Place blobify-standalone.jar in your classpath and execute
+
+java -cp blobify-standalone.jar <image-file-roster>
+
+where <image-file-roster> is a text file that lists each file to be processed on a
+separate line, followed by the region of interest as a sequence of 6 integers,
+according to the format:
+
+<file-name> <row> <col> <layer> <width> <height> <thickness>
+
+Each field should be separated by whitespace consisting of spaces,
+tabs, or by commas.
+
+* License
+
+blobify is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+blobify is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with blobify.  If not, see <http://www.gnu.org/licenses/>.
