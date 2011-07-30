@@ -23,7 +23,7 @@
 ;;; by other parts of agglomerate.
 
 
-(ns agglomerate.vectors)
+(ns blobify.vectors)
 
 ;;; Data representation.
 ;;;

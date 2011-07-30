@@ -48,7 +48,7 @@
         [blobify.utils :only (dbg
                                 debug
                                 floor-rem
-                                int-to-ubytes
+                                int-to-ubyte
                                 ubyte-to-int
                                 get-directory
                                 get-filename
