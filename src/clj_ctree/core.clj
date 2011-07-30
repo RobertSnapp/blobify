@@ -1,4 +1,5 @@
 ;;; core.clj is part of blobify.
+;;;
 ;;; blobify is a clojure program that indentifies and analyzes connected
 ;;; components in grayscale images and image stacks using component trees.
 ;;;

@@ -1,11 +1,10 @@
- * About this Software
+* About this Software
 
 blobify is a clojure application that identifies and analyzes connected components in
 graylevel images and image stacks. The program works with image files in both tif and
 lsm formats.
 
 (C) 2011 Robert R. Snapp
-
 
 * Usage
 
