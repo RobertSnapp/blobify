@@ -22,43 +22,48 @@
 ;;; The implementation of the component tree for gray-level images.
 
 (ns blobify.core
+  (:require (clojure.java.io))
   (:import (java.awt.image BufferedImage)
            (java.awt Color Graphics Dimension)
+           (java.io File)
+           (javax.imageio IIOImage ImageIO)
+           (javax.imageio.plugins.jpeg JPEGImageWriteParam)
            (javax.swing JPanel JFrame JLabel)
            (ij ImagePlus)
            (org.imagearchive.lsm.reader Reader))
-  (:use  [blobify.image :only (get-dimensionality
-								 get-filtered-neighborhood
-								 get-neighborhood-mask
-								 get-pixel
-                         get-pixel-site
-                         get-offset-of-site
-                         get-offsets
-                         get-scale-factors
-                         get-site-of-offset
-								 get-size
-                         scale-site
-								 with-image-get-neighboring-offsets)]
-         [blobify.utils :only (dbg
- 								 dbg-indent
-                         debug
-								 least-above
-								 seq2redundant-map
-                         square
-                         tree-select
-                         when-dbg)]
-         [blobify.vectors :only (flat-vector-auto-product
-          l2-distance
-          interset-distance
-          square-distance
-          vector-sub
-          vector-interp
-          vector-square)]
-         [blobify.graphics :only (get-indexed-rgb)]
-		 [clojure.set :only (intersection
-							 union)]
-		 [clojure.contrib.pprint :only (cl-format)]
-       clojure.test
+  (:use [blobify.image :only (get-dimensionality
+                              get-filtered-neighborhood
+                              get-neighborhood-mask
+                              get-pixel
+                              get-pixel-site
+                              get-offset-of-site
+                              get-offsets
+                              get-scale-factors
+                              get-site-of-offset
+                              get-size
+                              scale-site
+                              with-image-get-neighboring-offsets)]
+        [blobify.utils :only (dbg
+                              dbg-indent
+                              debug
+                              least-above
+                              seq2redundant-map
+                              square
+                              tree-select
+                              when-dbg)]
+        [blobify.vectors :only (flat-vector-auto-product
+                                l2-distance
+                                interset-distance
+                                square-distance
+                                v+
+                                v-
+                                vector-interp
+                                vector-square)]
+        [blobify.graphics :only (get-indexed-rgb)]
+        [clojure.set :only (intersection
+                            union)]
+        [clojure.contrib.pprint :only (cl-format)]
+        clojure.test
 		 ))
 
 (defn bin-by-intensity
@@ -121,9 +126,11 @@ lies within the closed bounding box defined by the lower and upper offset vector
       (if (empty? ctrees)
         false
         (let [next-tree (first ctrees)]
-          (cond  (and (= intensity (:intensity next-tree)) (contains? (:offsets next-tree) offset)) true,
+          (cond  (and (= intensity (:intensity next-tree))
+                      (contains? (:offsets next-tree) offset)) true,
                  (< intensity (:intensity next-tree)) (recur (rest ctrees)),
-                 (and (:box ctree) (not (site-inside-box? image site (:box ctree)))) (recur (rest ctrees)),
+                 (and (:box ctree) (not (site-inside-box? image site (:box ctree))))
+                 (recur (rest ctrees)),
                  :else (recur (concat (remove nil? (:children next-tree)) (rest ctrees)))))))))
 
 (defn merge-boxes
@@ -150,8 +157,8 @@ represented by each unite at the minimum intensity of the two. Note that the fun
     (let [n12 (+ n1 n2)
           r12 (float (/ n1 n12)) ; interpolation parameter
           m12 (vector-interp m2 m1 r12) ; r12 = 0 implies m12 = m2
-         ;; v12 (/ (+ (* n1 (+ v1 (vector-square (vector-sub m1 m12))))
-         ;;           (* n2 (+ v2 (vector-square (vector-sub m2 m12))))) n12)
+         ;; v12 (/ (+ (* n1 (+ v1 (vector-square (v- m1 m12))))
+         ;;           (* n2 (+ v2 (vector-square (v- m2 m12))))) n12)
           v12 (vector-interp v2 v1 r12) ; the weighted second moment
           e12 (+ e1 e2)
           b1x (redefine-box-if-nil b1 set1)
@@ -186,13 +193,13 @@ represented by each unite at the minimum intensity of the two. Note that the fun
 threhsold, make-ctree generates a component tree for the image assuming the topology specified
 by the second argument (adjacent lattice sites within the hamming radius are topologically
 connected). Pixel intensities below min-intensity are ignored."
-  ([image max-hamming-radius min-intensity roi]
-     (printf "Sorting %d %d-dimensional pixels into intentity bins ... "
-             (get-size image) (get-dimensionality image))
+  ([image max-hamming-radius min-intensity roi verbose]
+     (if verbose (printf "Sorting %d %d-dimensional pixels into intensity bins ... "
+                         (get-size image) (get-dimensionality image)))
      (let [bins (filter #(>= (first %) min-intensity) (bin-by-intensity image roi))
            mask (get-neighborhood-mask (get-dimensionality image) max-hamming-radius)
            k-values (keys bins)]
-       (print "... done.\n\n")
+       (if verbose (print "... done.\n\n"))
        (letfn [(get-bright-neighbors	; return a list of offsets with intensities that are greater
                  [offset]				   ; than or equal to that of the indicated offset (arg1).
                 (let [threshold (get-pixel image offset)
@@ -232,14 +239,14 @@ connected). Pixel intensities below min-intensity are ignored."
                               (recur (rest open-roots) (merge-ctrees image local-root s) other-roots))
                           (do (dbg :make-ctree-cc "offset ~a disjoins ~s. (neighbors= ~a)~%" offset s neighbors)
                               (recur (rest open-roots) local-root (conj other-roots s)))))))))]
-         (printf "  Intensity \t    Count \t  Components:\n")
+         (if verbose (printf "  Intensity \t    Count \t  Components:\n"))
          (loop [ct nil b bins]
            (when-dbg :make-ctree (dorun (map #(pprint-ctree %) ct)))
            (if (empty? b)
              ct
              (let [[k offsets] (first b),
                    k-sets (reduce #(collect-components %1 %2) ct offsets)]
-               (printf "%10d \t %10d \t %10d\n" k (count offsets) (count k-sets))
+               (if verbose (printf "%10d \t %10d \t %10d\n" k (count offsets) (count k-sets)))
                (recur k-sets (rest b)))))))))
 
 (defn chop-intensity
@@ -248,11 +255,17 @@ connected). Pixel intensities below min-intensity are ignored."
 		  (children-fn [ctree] (:children ctree))]
 	(tree-select filter-fn children-fn ctrees)))
 
-(defn chop-size
-  [ctrees threshold]
-  (letfn [(filter-fn [ctree] (>= threshold (:size ctree)))
+(defn trim
+  "Select components that are less than (or equal to) the indicated size."
+  [ctrees max-size]
+  (letfn [(filter-fn [ctree] (>= max-size (:size ctree)))
 		  (children-fn [ctree] (:children ctree))]
-	(tree-select filter-fn children-fn ctrees)))
+    (tree-select filter-fn children-fn ctrees)))
+
+(defn sift
+  "Selects components that are greater than or equal to the indicated size."
+  [ctrees min-size]
+  (filter #(<= min-size (:size %)) ctrees))
 
 ;;; Functions that anayze a list of ctrees.
 
@@ -263,9 +276,24 @@ connected). Pixel intensities below min-intensity are ignored."
   (NodeSummary. (:size ctree)
                 (scale-site image (:mean ctree))
                 (vec (map #(* %1 %2)
-                          (vector-sub (:variance ctree) (flat-vector-auto-product (:mean ctree)))
+                          (v- (:variance ctree) (flat-vector-auto-product (:mean ctree)))
                           (flat-vector-auto-product (get-scale-factors image))))
                 (:energy ctree)))
+
+(defn distance-table
+  "Given a list of vertices, returns an upper-triangular table that contains pairwise distances."
+  [vecs]
+  (let [n (count vecs)]
+    (for [i (range (dec n))]
+      (let [v0 (nth vecs i)]
+        (for [j (range (inc i) n)]
+          (l2-distance v0 (nth vecs j)))))))
+
+(defn get-distances-from-pivot
+  [table j]
+  (concat (for [i (range j)]
+            (nth (nth table i) (- j i 1)))
+          (if (< j (count table)) (nth table j))))
 
 (defn print-distance-table
   [vecs]
@@ -512,11 +540,12 @@ rooted at ComponentTreeNodes ct1 and ct2."
   "Displays the 2d image (arg1) in a JFrame GUI, using a grayscale, along with each
 component tree in the list ctrees (arg2), which are each rendered using an index
 color."
-  [{:keys [dimensions raster] :as image} ctrees]
+  [{:keys [dimensions raster] :as image} ctrees roi]
   (let [max-side 1024
         frame (JFrame. "Component Viewer")
-        cols (dimensions 0)
-        rows (dimensions 1)
+        [[col0 row0] [coln rown]] (map (partial get-site-of-offset image) roi)
+        cols (- coln col0)
+        rows (- rown row0)
         scale (min (/ max-side (max cols rows)) 10)
         buffer (new BufferedImage
                     (* scale cols)
@@ -527,7 +556,7 @@ color."
         graphics (.createGraphics buffer)]
     (doseq [x (range cols)
             y (range rows)]
-      (let [v (get-pixel-site image (vector x y))]
+      (let [v (get-pixel-site image (v+ (vector x y) (vector col0 row0)))]
         (doto graphics
           (.setColor (new Color v v v 255))
           (.fillRect (* x scale) (* y scale) scale scale))))
@@ -547,7 +576,7 @@ color."
                   (dbg :render-ctree  "   [x y] = [~a ~a]~%" x y)
                   (doto graphics
                     (.setColor (new Color r g b 144))
-                    (.fillRect (* x scale) (* y scale) scale scale))))
+                    (.fillRect (* (- x col0) scale) (* (- y row0) scale) scale scale))))
               (recur (concat children (rest ct))))))))
     
     (.add frame canvas)
@@ -560,12 +589,11 @@ color."
   "Displays the 3d image (arg1) in a JFrame GUI, using a grayscale, along with each
 component tree in the list ctrees (arg2), which are each rendered using an index
 color."
-  [{:keys [dimensions] :as image} ctrees]
+  [{:keys [dimensions] :as image} ctrees roi]
   (let [max-side 1024
         frame (JFrame. "Component Viewer")
-        cols (dimensions 0)
-        rows (dimensions 1)
-        layers (dimensions 2)
+        [site0 siten] (map (partial get-site-of-offset image) roi)
+        [cols rows lays] (v- siten site0)
         scale (int (min (/ max-side (max cols rows)) 20))
         buffer (new BufferedImage
                     (* scale cols)
@@ -576,7 +604,7 @@ color."
         graphics (.createGraphics buffer)]
     (doseq [x (range cols)
             y (range rows)]
-      (let [v (for [z (range layers)] (get-pixel-site image (vector x y z)))
+      (let [v (for [z (range lays)] (get-pixel-site image (v+ (vector x y z) site0)))
             vm  (apply max v)]
         (doto graphics
           (.setColor (new Color vm vm vm 255))
@@ -597,13 +625,77 @@ color."
                   (dbg :render-ctree  "   [x y] = [~a ~a]~%" x y)
                   (doto graphics
                     (.setColor (new Color r g b 144))
-                    (.fillRect (* x scale) (* y scale) scale scale))))
+                    (.fillRect (* (- x (first site0)) scale)
+                               (* (- y (second site0)) scale) scale scale))))
               (recur (concat children (rest ct))))))))
     
     (.add frame canvas)
     (.setSize frame (new Dimension (* scale cols) (+ 20 (* scale rows))))
     (.show frame))
   )
+
+(defn create-buffered-image-of-ctree-3d
+  "Displays the 3d image (arg1) in a JFrame GUI, using a grayscale, along with each
+component tree in the list ctrees (arg2), which are each rendered using an index
+color."
+  [{:keys [dimensions] :as image} ctrees roi]
+  (let [[site0 siten] (map (partial get-site-of-offset image) roi)
+        [cols rows lays] (v- siten site0)
+        buffer (new BufferedImage cols rows BufferedImage/TYPE_INT_ARGB)
+        graphics (.createGraphics buffer)]
+    (doseq [x (range cols)
+            y (range rows)]
+      (let [v (for [z (range lays)] (get-pixel-site image (v+ (vector x y z) site0)))
+            vm  (apply max v)]
+        (doto graphics
+          (.setColor (new Color vm vm vm 255))
+          (.fillRect x y 1 1))))
+    
+    (doseq [ct (zipmap (iterate inc 0) ctrees)]
+      (let [color-index (first ct)]
+        (loop [ct (list (second ct))]
+          (when (not (empty? ct))
+            (let [current (first ct)
+                  intensity (:intensity current)
+                  offsets (:offsets current)
+                  children (:children current)]
+              (dbg :render-ctree  "intensity-> ~a, offsets-> ~a~%" intensity offsets)
+              (doseq [o (seq offsets)]
+                (let [[x y _] (get-site-of-offset image o)
+                      [r g b] (get-indexed-rgb color-index)]
+                  (dbg :render-ctree  "   [x y] = [~a ~a]~%" x y)
+                  (doto graphics
+                    (.setColor (new Color r g b 144))
+                    (.fillRect  (- x (first site0)) (- y (second site0)) 1 1))))
+              (recur (concat children (rest ct))))))))
+    buffer))
+
+(defn display-ctree-3d
+  [image title ctrees roi]
+  (let [[site0 siten] (map (partial get-site-of-offset image) roi)
+        [cols rows lays] (v- siten site0)
+        frame (JFrame. title)
+        buffer (create-buffered-image-of-ctree-3d image ctrees roi)
+        canvas (proxy [JLabel] []
+                 (paint [g] (.drawImage g buffer 0 0 this)))]
+    (.add frame canvas)
+    (.setSize frame (new Dimension  cols (+ 20 rows)))
+    (.show frame)))
+
+(defn export-rendered-ctree-3d
+  "Generate a png image file of the indicated image with the superimposed component tree."
+  [filename image ctrees roi]
+  (let [image-writer (.next (ImageIO/getImageWritersByFormatName "png"))
+        buffer (create-buffered-image-of-ctree-3d image ctrees roi)
+        ;; file (File. filename)
+        ]
+    (try
+      (with-open [image-output-stream (ImageIO/createImageOutputStream
+                                       (clojure.java.io/file filename))]
+      (.setOutput image-writer image-output-stream)
+      (.write image-writer buffer))
+      ;;  (ImageIO/write buffer "PNG" file)
+      (finally (do (.dispose image-writer))))))
 
 ;;; Tests
 
