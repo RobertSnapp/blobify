@@ -100,25 +100,6 @@
 (def short2006 "/Users/snapp/data/cellNuclei/lsmData_2006/shortRoster3d.in")
 (def lsmdir2007 "/Users/snapp/data/cellNuclei/lsmData/fileRoster3d.in")
 
-(defn analyze
-  [path fraction]
-  (let [ _ (printf "Opening image %s..." path)
-        stack (open-stack-image path 0 2)  ; access only the DAPI channel.
-        _ (printf "done.\nComputing cumulative histogram...")
-        c-hist (cumulative-histogram stack)
-        _ (printf "done.\nComputing adaptive threshold...")
-        threshold (inverse-cumulative-histogram c-hist fraction)
-        _ (printf "threshold = %d, done.\nComputing ctree:\n" threshold)
-        ctrees (sift (make-ctree stack 3 threshold) 200)
-        _ (printf "Creating projected image...")
-        _ (render-ctree-3d stack ctrees)
-        _ (printf "done.\n Making summary and distance table:\n")
-        summary (sort-by :size >  (map (partial make-summary stack) (filter #(< 10 (:size %)) ctrees)))
-        _ (print-distance-table (map :mean summary))
-        _ (printf "done.\n")]
-    summary))
-
-
 
 (defn next-file-version-index
   "Returns the next unused file-version-index (i.e., numerical suffix) used for files that share the
@@ -199,7 +180,7 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
         output-file-index (next-file-version-index "out/ctree.out")
         output-file (str "out/ctree.out" output-file-index)]
     (append-spit output-file (cl-format false "blobify output generated at time ~A~%" time_stamp))
-    (append-spit output-file (cl-format false "using roster file ~A with image-path-prefix ~%"
+    (append-spit output-file (cl-format false "using roster file ~A with image-path-prefix ~A ~%"
                                         roster-path image-path-prefix))
     (append-spit output-file
                  (cl-format false "Fields with a * are given in microns. Other quantities are dimensionless.~2%"))
@@ -218,6 +199,9 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
               (let [image-file (nth tokens 0),
                     bbox6 (take 6 (map #(Integer/parseInt %) (drop 1 tokens))),
                     image-path (str image-path-prefix image-file),
+                    _ (if verbose
+                        (println "Processing file" image-path "with threshold" min-intensity
+                                 "and bbox" bbox6))
                     results9 (process-image-file image-path bbox6 min-intensity verbose)
                     _ (append-spit
                        output-file
@@ -279,7 +263,8 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
         (if (empty? the-args)
           (System/exit 0)
           (if roster?
-            (println (process-roster-file (first the-args)  min-intensity verbose?))
+            (println (process-roster-file (first the-args) path
+                                          (Integer/parseInt min-intensity) verbose?))
             (println (first the-args)
                      col row lay width height girth min-intensity
                      (process-image-file (first the-args)
