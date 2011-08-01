@@ -394,6 +394,13 @@ the second being the remainder of the quotient."
   [x]
   (* x x))
 
+(defn ave
+  "Returns the average value of a numerical sequence. The value 0 is returned if the sequence is empty."
+  [& s]
+  (if (empty? s)
+    0
+    (/ (apply + s) (count s))))
+
 ;;; Some AI search methods.
 (defn tree-search
   "A general function for performing a tree-search, based on the function of the same name
