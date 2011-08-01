@@ -74,6 +74,7 @@
 	  (vec (concat sum (drop v1c v2)))
 	  (vec (concat sum (drop v2c v1))))))
   ([v1 v2 & more] (reduce vector-add (vector-add v1 v2) more)))
+(def v+ vector-add)
 
 (defn vector-sub
   "Subtract two or more vectors"
@@ -86,6 +87,7 @@
 	  (vec (concat diff (map #(- %) (drop v1c v2))))
 	  (vec (concat diff (drop v2c v1))))))
   ([v1 v2 & more] (reduce vector-sub (vector-sub v1 v2) more)))
+(def v- vector-sub)
 
 (defn vector-divide
   "Divides a every element in vector v by a denominator d"
@@ -96,6 +98,7 @@
   "Multiplies a every element in vector v by a scalar s"
   [v s]
   (vec (map #(* % s) v)))
+(def v* vector-multiply)
 
 (defn vector-interp
   "Returns a vector that is the linear interpolation between vectors v0 (arg1) and v1 (arg2),
