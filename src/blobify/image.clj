@@ -38,23 +38,24 @@
            (ij ImagePlus)
            (ij.io Opener)
            (org.imagearchive.lsm.reader Reader))
-  (:use [blobify.vectors :only (inner-product
-                                  l-infinity-distance
-                                  vector-add
-                                  vector-divide
-                                  vector-sub
-                                  vector-square)]
+  (:use 
         [blobify.polynomial :only (interpolate multi-horner)]
         [blobify.utils :only (dbg
-                                debug
-                                floor-rem
-                                int-to-ubyte
-                                ubyte-to-int
-                                get-directory
-                                get-filename
-                                get-filename-ext
-                                pos-if
-                                seq2redundant-map)]
+                              debug
+                              floor-rem
+                              int-to-ubyte
+                              ubyte-to-int
+                              get-directory
+                              get-filename
+                              get-filename-ext
+                              pos-if
+                              seq2redundant-map)]
+        [blobify.vectors :only (inner-product
+                                l-infinity-distance
+                                v+
+                                v-
+                                vector-divide
+                                vector-square)]
         [clojure.contrib.pprint :only (cl-format)]
         [clojure.contrib.math :only (abs ceil)]
         [clojure.contrib.generic.math-functions :only (pow)]
@@ -308,7 +309,7 @@ the two Cartesian directions. The image countains 13 positive clusters."
 				(int-to-ubyte (min 255 (inner-product amps
 							   (map #(Math/exp
 									  (/ (vector-square
-										  (vector-sub v %))
+										  (v- v %))
 										 (- sigma2*2))) centers)))))
 		dimensions (vector width width),
 		dimension-products (dimensions-to-dimension-products dimensions)
@@ -343,7 +344,7 @@ the three Cartesian directions. The image contains 13 positive clusters."
 				(int-to-ubyte (min 255 (inner-product amps
 							   (map #(Math/exp
 									  (/ (vector-square
-										  (vector-sub v %))
+										  (v- v %))
 										 (- sigma2*2))) centers)))))
 		dimensions (vector width width width),
 		dimension-products (dimensions-to-dimension-products dimensions)
@@ -373,7 +374,7 @@ the three Cartesian directions. The image contains 13 positive clusters."
    neighbors."
   ([v1 v2 threshold]
 	 {:pre [(< 0 threshold) (<= threshold (max (count v1) (count v2)))]}
-	 (let [abs-diff (map #(Math/abs %) (seq (vector-sub v1 v2)))]
+	 (let [abs-diff (map #(Math/abs %) (seq (v- v1 v2)))]
 	   (and 
 		(== (apply max abs-diff) 1)		         ; l-infinity distance == 1, AND
 		(<= (apply + abs-diff) threshold))))     ; l-one distance <= threshold
@@ -504,7 +505,7 @@ Hamming distance r from the origin."
 (defn translate-mask
   "Translates a neighborhood mask so that it is centered on the indicated site."
   [mask site]
-  (map #(vector-add site %) mask))
+  (map #(v+ site %) mask))
 
 (defn interior-site?
   "Returns true if and only if the indicated site falls within the n-dimensional
@@ -768,6 +769,24 @@ of integers."
 ;;;================
 ;;; The following functions should work with every image type that implements the ImageAccess protocol.
 ;;; These functions extract quantitative information from an image.
+
+(defn get-default-roi
+  "Returns the default region of interest for the indicated image as a vector pair of offsets."
+  [image]
+  (vector 0 (get-size image)))
+
+(defn get-default-roi-as-sites
+  "Returns the default region of interest for the indicated image as a pair of lattice sites."
+  [image]
+  (map (partial get-site-of-offset image) (get-default-roi image)))
+
+(defn get-default-roi-as-offset-delta-vector
+  "Returns the default region of interest for the indicated image as a vector containing offset
+values and deltas"
+  [image]
+  (let [roi-as-sites (get-default-roi-as-sites image)]
+    (concat (first roi-as-sites) (v- (second roi-as-sites) (first roi-as-sites)))))
+
 (defn get-max
   "Returns the maximum intensity in an image"
   [image]
