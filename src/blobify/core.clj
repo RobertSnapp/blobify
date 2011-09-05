@@ -49,7 +49,7 @@
                               least-above
                               seq2redundant-map
                               square
-                              tree-select
+                              tree-search
                               when-dbg)]
         [blobify.vectors :only (flat-vector-auto-product
                                 l2-distance
@@ -193,10 +193,21 @@ represented by each unite at the minimum intensity of the two. Note that the fun
 threhsold, make-ctree generates a component tree for the image assuming the topology specified
 by the second argument (adjacent lattice sites within the hamming radius are topologically
 connected). Pixel intensities below min-intensity are ignored."
-  ([image max-hamming-radius min-intensity roi verbose]
+  ([image max-hamming-radius roi min-intensity verbose]
      (if verbose (printf "Sorting %d %d-dimensional pixels into intensity bins ... "
                          (get-size image) (get-dimensionality image)))
-     (let [bins (filter #(>= (first %) min-intensity) (bin-by-intensity image roi))
+     (let [bins0 (filter #(> (first %) min-intensity) (bin-by-intensity image roi))
+           histogram  (for [[key val] bins0] [key (count val)])
+           energy (apply + (map (fn [[k v]] (* k v)) histogram))
+           size (apply + (map (fn [[k v]] v) histogram))
+           mean (float (/ energy size))
+           _ (if verbose (println "Average intensity = " mean))
+           bin-threshold (loop [value 255 sum 0 h histogram]
+                           (if (or (empty? h) (> sum (* size 0.05)))
+                             value
+                             (recur (first (first h)) (+ sum (second (first h))) (rest h))))
+           _ (if verbose (println "bin-threshold = " bin-threshold))
+           bins (filter #(>= (first %) bin-threshold) bins0)
            mask (get-neighborhood-mask (get-dimensionality image) max-hamming-radius)
            k-values (keys bins)]
        (if verbose (print "... done.\n\n"))
@@ -230,7 +241,7 @@ connected). Pixel intensities below min-intensity are ignored."
                                                         ),
                          other-roots nil]
                     (if (empty? open-roots)
-                      (let [consolidated-ctrees (conj other-roots local-root)]  ; here the let facilitates the following side effect.
+                      (let [consolidated-ctrees (conj other-roots local-root)]  ; let enables dbg side effect.
                         (dbg-indent :make-ctree-cc 1 "returning ~a ~%" consolidated-ctrees)
                         consolidated-ctrees)
                       (let [s (first open-roots)]
@@ -243,7 +254,7 @@ connected). Pixel intensities below min-intensity are ignored."
          (loop [ct nil b bins]
            (when-dbg :make-ctree (dorun (map #(pprint-ctree %) ct)))
            (if (empty? b)
-             ct
+             [bin-threshold ct]
              (let [[k offsets] (first b),
                    k-sets (reduce #(collect-components %1 %2) ct offsets)]
                (if verbose (printf "%10d \t %10d \t %10d\n" k (count offsets) (count k-sets)))
@@ -253,19 +264,39 @@ connected). Pixel intensities below min-intensity are ignored."
   [ctrees threshold]
   (letfn [(filter-fn [ctree] (<= threshold (:intensity ctree)))
 		  (children-fn [ctree] (:children ctree))]
-	(tree-select filter-fn children-fn ctrees)))
+	(tree-search filter-fn children-fn ctrees)))
 
 (defn trim
   "Select components that are less than (or equal to) the indicated size."
   [ctrees max-size]
   (letfn [(filter-fn [ctree] (>= max-size (:size ctree)))
 		  (children-fn [ctree] (:children ctree))]
-    (tree-select filter-fn children-fn ctrees)))
+    (tree-search filter-fn children-fn ctrees)))
 
 (defn sift
   "Selects components that are greater than or equal to the indicated size."
   [ctrees min-size]
   (filter #(<= min-size (:size %)) ctrees))
+
+(defn prune
+  "Given a component, prune follows the main trunk of its tree, returning a list of descendents that correspond
+to a 20% or more split (if such a split occurs), or a list containing the original component (if not)."
+  [split-ratio-threshold min-child-size ctree]
+  (letfn [(goal-fn  [node]
+            (let [children (:children node)]
+              (and (> (count children) 1)
+                   (let [split-ratio (float (/ (:size (second (sort-by :size > children)))
+                                                (:size node)))]
+                     (> split-ratio split-ratio-threshold)))))
+          (successor-fn [node]
+            (let [children (filter #(<= min-child-size (:size %)) (:children node))]
+              (if (pos? (count children))
+                (list (first (sort-by :size > children)))
+                ())))]
+    (let [result (tree-search ctree goal-fn successor-fn concat)]
+    (if result
+      (:children result)
+      (list ctree)))))
 
 ;;; Functions that anayze a list of ctrees.
 
