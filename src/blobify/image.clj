@@ -90,7 +90,12 @@ returns the intensity of the indicated pixel."
 (defn get-scale-factors
   "Returns the scale factor for each dimension."
   [image]
-  (scale-site image (vec (take (get-dimensionality image) (repeat 1)))))
+  (scale-site image
+              (vec (take (get-dimensionality image) (repeat 1)))))
+
+(defn get-pixel-volume
+[image]
+  (apply * (get-scale-factors image)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Image2d
@@ -787,21 +792,28 @@ values and deltas"
   (let [roi-as-sites (get-default-roi-as-sites image)]
     (concat (first roi-as-sites) (v- (second roi-as-sites) (first roi-as-sites)))))
 
-(defn get-max
-  "Returns the maximum intensity in an image"
-  [image]
-  (apply max (map #(get-pixel image %) (range (get-size image)))))
 
 (defn get-offsets
   "Returns a sequence of raster offsets that parameterize the specified image and region of interest (roi)."
-  ([image]
-     (range (get-size image)))
   ([image roi]
      (let [[min-site max-site] (map (partial get-site-of-offset image) roi)
            inc-max-site (map inc max-site)]
        (map (partial get-offset-of-site image)
-         (apply cartesian-product (map range min-site inc-max-site))))))
+            (apply cartesian-product (map range min-site inc-max-site)))))
+  ([image]
+     (range (get-size image))))
   
+#_(defn get-max
+  "Returns the maximum intensity in an image that falls within the indicated region of interest."
+  ([image roi]
+     (apply max (map (partial get-pixel image) (get-offsets image roi))))
+  ([image]
+     (apply max (map (partial get-pixel image) (get-offsets image)))))
+
+(defn get-max
+  "Returns the maximum intensity in an image that falls within the indicated region of interest."
+  [image & roi]
+  (apply max (map #(get-pixel image %) (apply get-offsets (cons image roi)))))
 
 (let [nthreads (.availableProcessors (Runtime/getRuntime))
       vals-per-thread 1024]
@@ -834,7 +846,6 @@ histogram is evaluated over the inclusive region of interest. "
          (serial-histogram 256 (pmap (partial get-pixel image) (get-offsets image))))
       ([image roi]
          (serial-histogram 256 (pmap (partial get-pixel image) (get-offsets image roi)))))))
-
 
 (defn normalize
   "Normailizes a histogram (or other nonnegative vector) by dividing each entry by the sum."
