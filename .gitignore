@@ -1,2 +1,3 @@
 /resources/ij.jar
-/out/*
+*.jar
+
