@@ -62,7 +62,7 @@
 ;;; * dbg-indent
 ;;; * dbg-reset
 ;;;
-;;; * tree-select
+;;; * tree-search
 ;;;
 ;;; String Operations
 ;;; * get-directory
@@ -424,7 +424,6 @@ combiner      is a function of two list arguments new states, followed by old st
         (if (goal? next)
           next
           (recur (combiner (successors next) (rest states))))))))
-
 
 (defn depth-first-tree-search
   [start goal? successors]

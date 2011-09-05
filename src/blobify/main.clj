@@ -22,7 +22,7 @@
 ;;; A driver for the component tree analysis library
 ;;;
 ;;; Syntax:
-;;; java -jar blobify-standalone.jar <options>
+;;; java -jar blobify-0.1-standalone.jar <options>
 ;;;
 ;;; Command-line options:
 ;;;
@@ -40,8 +40,10 @@
                               get-dimensionality
                               get-max
                               get-pixel-site
+                              get-pixel-volume
                               get-offset-of-site
                               get-scale-factors
+                              get-site-of-offset
                               get-size
                               cumulative-histogram
                               inverse-cumulative-histogram)]
@@ -53,6 +55,7 @@
                              make-ctree
                              make-summary
                              render-ctree-3d
+                             prune
                              sift
                              trim
                              print-distance-table)]
@@ -81,24 +84,34 @@
   (:gen-class)
   )
 
-(def EMPTY_TILE (ImageIcon. "empty.png"))
 
 ;;; Test images
 
-(def m568 "/Users/snapp/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
-(def m568c "/Users/snapp/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
-(def m567_2ll "/Users/snapp/data/cellNuclei/ctree/tif/m567_2ll.tif")
-(def m588_1h "/Users/snapp/data/cellNuclei/ctree/tif/m588_1h.tif")
-(def m567_2kk "/Users/snapp/data/cellNuclei/ctree/tif/m567_2kk.tif")
-(def m567_2nn "/Users/snapp/data/cellNuclei/ctree/tif/m567_2nn.tif")
-(def m675_2d "/Users/snapp/data/cellNuclei/ctree/tif/m675_2d.tif")
-(def m675_2g "/Users/snapp/data/cellNuclei/ctree/tif/m675_2g.tif")
-(def m675_2k "/Users/snapp/data/cellNuclei/ctree/tif/m675_2k.tif")
-(def m675_4a "/Users/snapp/data/cellNuclei/ctree/tif/m675_4a.tif")
+(def m568 "/Users/snapp/research/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
+(def m568c "/Users/snapp/research/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
+(def m567_2ll "/Users/snapp/research/data/cellNuclei/ctree/tif/m567_2ll.tif")
+(def m588_1h "/Users/snapp/research/data/cellNuclei/ctree/tif/m588_1h.tif")
+(def m567_2kk "/Users/snapp/research/data/cellNuclei/ctree/tif/m567_2kk.tif")
+(def m567_2nn "/Users/snapp/research/data/cellNuclei/ctree/tif/m567_2nn.tif")
+(def m675_2d "/Users/snapp/research/data/cellNuclei/ctree/tif/m675_2d.tif")
+(def m675_2g "/Users/snapp/research/data/cellNuclei/ctree/tif/m675_2g.tif")
+(def m675_2k "/Users/snapp/research/data/cellNuclei/ctree/tif/m675_2k.tif")
+(def m675_4a "/Users/snapp/research/data/cellNuclei/ctree/tif/m675_4a.tif")
 
-(def lsmdir2006 "/Users/snapp/data/cellNuclei/lsmData_2006/fileRoster3d.in")
-(def short2006 "/Users/snapp/data/cellNuclei/lsmData_2006/shortRoster3d.in")
-(def lsmdir2007 "/Users/snapp/data/cellNuclei/lsmData/fileRoster3d.in")
+;;; need new window limits
+(def m583_1e ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m583_1e.lsm" [384 320 0 256 320 30]])
+(def m583_2e ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m583_2e.lsm" [384 396 0 212 352 30]])
+(def m585_1h_G3 ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m585_1h_G3.lsm" [256 180 0 512 512 30]])
+(def m691_1g ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m691_1g.lsm" [410 314 0 291 398 30]])
+(def m714_4a ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m714_4a.lsm" [336 462 0 378 341 30]])
+(def m714_4b ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m714_4b.lsm" [256 256 0 512 512 30]])
+(def m714_4g ["/Users/snapp/research/data/cellNuclei/lsmData_2006/m714_4g.lsm" [384 384 0 512 512 30]])
+
+
+;;; File rosters
+(def lsmdir2006 "/Users/snapp/research/data/cellNuclei/lsmData_2006/fileRoster3d.in")
+(def short2006 "/Users/snapp/research/data/cellNuclei/lsmData_2006/shortRoster3d.in")
+(def lsmdir2007 "/Users/snapp/research/data/cellNuclei/lsmData/fileRoster3d.in")
 
 
 (defn next-file-version-index
@@ -110,11 +123,22 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
                 (map (partial (comp read-string first re-seq) #"[0-9]+$")
                      (filter (partial re-find (re-pattern (str filename "[0-9]+$")))
                              (listdir dir)))))))
+
+(defn bb-to-roi
+  "Computes the region of interest (a vector of two offsets) of the given bounding box bb."
+  [image bb]
+  (let [d (get-dimensionality image)
+        lower-site (take d bb)
+        deltas (drop d bb)
+        upper-site (map min (map dec (get-dimensions image))
+                        (v+ lower-site (map dec deltas)))]
+    (vec (map (partial get-offset-of-site image) (list lower-site upper-site)))))
+
 (defn process-image-file
   "Applies a sequence of operations to the indicated image or image stack:
    1. The image file is opened.
    2. Using min-intensity as the threshold value, a compoment tree is constructed.
-   3. Components that are smaller than 200 voxels are dropped. 
+   3. Components that are smaller than 50 voxels are dropped. 
    4. The pairwise distances between component centers are computed.
    5. A list is printed that contains the following data:
       The number of compoents
@@ -127,31 +151,26 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
    path:          a complete path to a tif or lsm file that contains an image stack;
    bbox:          a six-dimensional vector of ints that describes the region of interest,
                   of the form [x y z delta-x delta-y delta-z];
-   min-intensity: the minimum intesity that will be added to the component tree.
+   min-intensity: minimium voxel intensity that will be used for computing the image histogram within
+                  the function make-ctree.
+   sift-volume    measured in cubic microns, the size of the smallest component that will be retained
+                  in the component tree.
    verbose:       if true, then progress messages are sent to *out*."
-  [path bbox min-intensity verbose]
+  [path bbox min-intensity sift-volume verbose]
   (let [ _ (if verbose (printf "Opening image %s..." path))
         stack (open-stack-image path 0 2) ; DAPI channel
         dimensions (get-dimensions stack)
         ;; _ (if verbose (printf "done.\nComputing cumulative histogram..."))
         d (get-dimensionality stack)
-        lower-site (vec (map #(max 0 (min %1 %2)) (take d bbox) (map dec dimensions)))
-        deltas (map #(if (zero? %1)
-                       (- %2 %3)
-                       (min %1 (- %2 %3))) (drop d bbox) (map dec dimensions) lower-site)
-        upper-site (v+ lower-site deltas)
-        roi-sites (vector lower-site upper-site)
-        roi-spec (map (partial get-offset-of-site stack) roi-sites)
-        ;; _ (println "roi-spec = " roi-spec)
-        roi (vector (max 0 (first roi-spec)) (min (dec (get-size stack)) (second roi-spec)))
+        roi (bb-to-roi stack bbox)
         ;; _ (println "roi = " roi)
         ;; c-hist (cumulative-histogram stack roi)
         ;; _ (if verbose (printf "done.\n"))
-        ;; (("Computing adaptive threshold..."))
-        ;; threshold (max min-intensity (inverse-cumulative-histogram c-hist max-fraction))
-        threshold  min-intensity
-        _ (if verbose (printf "threshold = %d.\nComputing ctree:\n" threshold))
-        ctrees (sift (make-ctree stack 1 threshold roi verbose) 200)
+        sift-size  (int (/ sift-volume (get-pixel-volume stack)))
+        min-child-size (* 4 sift-size)
+        [bin-threshold ct] (make-ctree stack 1 roi min-intensity verbose)
+        ctrees (sift (apply concat (map (partial prune 0.25 min-child-size)
+                                  (sift ct sift-size))) sift-size)
         png-filename (str (get-filename-root path) ".png")
         _ (if verbose (printf "Creating projected image in file %s..." png-filename))
         _ (export-rendered-ctree-3d png-filename stack ctrees roi)
@@ -159,22 +178,27 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
         summary (sort-by :size >  (map (partial make-summary stack) ctrees))
         _ (if verbose (print-distance-table (map :mean summary)))
         n-components (count ctrees)
-        [min-size max-size ave-size] (apply (juxt min max (comp float ave)) (map :size summary))
+        [min-size max-size ave-size] (if (pos? n-components)
+                                       (apply (juxt min max (comp float ave)) (map :size summary))
+                                       [0 0 0])
         d-table (distance-table (map :mean summary))
-        [min-distance max-distance ave-distance] (apply (juxt min max ave) (apply concat d-table))
-        ave-min-distance (if (pos? n-components)
+        [min-distance max-distance ave-distance] (if (< 1 n-components)
+                                                   (apply (juxt min max ave) (apply concat d-table))
+                                                   [0 0 0])
+        ave-min-distance (if (< 1 n-components)
                            (/ (apply +
                                      (map (partial
                                            (comp (partial apply min) get-distances-from-pivot)
                                            d-table) (range n-components))) n-components)
                            -1.0)
           ]
-    (list (get-scale-factors stack)
+    (list (get-scale-factors stack) 
+          bin-threshold
           n-components min-size max-size ave-size min-distance max-distance ave-distance ave-min-distance)
     ))
 
 (defn process-roster-file
-  [roster-path image-path-prefix min-intensity verbose]
+  [roster-path image-path-prefix min-intensity sift-volume verbose]
   (let [[YY MM DD hh mm ss] ((juxt year month day hour minute sec) (now))
         time_stamp (str MM "/" DD "/" DD  " at " hh ":" mm ":" ss)
         output-file-index (next-file-version-index "out/ctree.out")
@@ -202,30 +226,15 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
                     _ (if verbose
                         (println "Processing file" image-path "with threshold" min-intensity
                                  "and bbox" bbox6))
-                    results9 (process-image-file image-path bbox6 min-intensity verbose)
+                    results10 (process-image-file image-path bbox6 min-intensity sift-volume verbose)
                     _ (append-spit
                        output-file
                        (cl-format false
                                   "~32A ~3{~10,4F ~}~6{~6D ~}~6D ~{~8D ~8D ~8D ~10,2F ~10,4F ~10,4F ~10,4F ~10,4F~}~%"
-                                  image-file (first results9) bbox6 min-intensity (rest results9)))
+                                  image-file (first results10) bbox6 (second results10) (drop 2 results10)))
                     ]),
               :else
               (println "Bad line read = " line))))))
-
-(deftest main-test
-  (def img16 (make-blobby-image-2d 16))
-  (def s1 (open-stack-image m567_2ll 0 2))
-  (is (= (count s1) 5))
-  (def s2 (open-stack-image m588_1h 0 2))
-  (is (= (count s2) 5))
-  (def ch2 (cumulative-histogram s2))
-  )
-
-(deftest s1-test
-  (def s1 (open-stack-image m567_2ll 0 2))
-  (is (= (count s1) 5))
-  (def ch1 (cumulative-histogram s1))
-  (inverse-cumulative-histogram ch1 0.98))
 
 
 (defn- splash
@@ -238,18 +247,19 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
 
 (defn- usage
   []
-  (println "Usage: java -jar blobify-standalone.jar [options] <filename>"))
+  (println "Usage: java -jar blobify-0.1-standalone.jar [options] <filename>"))
 
 (defn -main [& args]
   (splash)
 
   ;; Parse any command line arguments
-  (with-command-line args
-    "Usage: java -jar blobify-standalone.jar [options] <filename>"
+  (let [sift-volume 0.033179]
+    (with-command-line args
+    "Usage: java -jar blobify-0.1-standalone.jar [options] <filename>"
     [[verbose? V? "If set, send detailed messages to console."]
      [roster? R? "If set, the filename is a roster of files."]
      [path "The directory that contains the image files." ""]
-     [min-intensity "The smallest intensity added to the compoent tree" "120"]
+     [min-intensity "The smallest intensity added to the component tree" "15"]
      [col "column offset" "0"]
      [row "row offset" "0"]
      [lay "layer offset" "0"]
@@ -264,14 +274,16 @@ common extension ext (arg1) in the subdirectory indicated by path (arg2)."
           (System/exit 0)
           (if roster?
             (println (process-roster-file (first the-args) path
-                                          (Integer/parseInt min-intensity) verbose?))
+                                          (Integer/parseInt min-intensity)
+                                          sift-volume verbose?))
             (println (first the-args)
                      col row lay width height girth min-intensity
                      (process-image-file (first the-args)
                                 (map #(Integer/parseInt %) (vector col row lay width height girth))
                                 (Integer/parseInt min-intensity)
+                                sift-volume
                                 verbose?))))
-        (recur (rest the-args))))))
+        (recur (rest the-args)))))))
 
 
 
