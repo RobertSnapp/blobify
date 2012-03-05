@@ -1,4 +1,4 @@
- ;;; project.clj is part of the source code for blobify.
+;;; project.clj is part of the source code for blobify.
 
 ;;; blobify is a clojure program that indentifies and analyzes connected
 ;;; components in grayscale images and image stacks using component trees.

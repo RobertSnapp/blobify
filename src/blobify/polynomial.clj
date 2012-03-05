@@ -20,7 +20,7 @@
 
 (ns blobify.polynomial)
 
-(defn horner
+#_(defn horner
   "Given an ascending vector (or seq) of coefficients and a scalar x, horner evaluates
    the corresponding polynomial using Horner's rule. For example, (horner [c0 c1 c2] x)
    evaluates to (c2*x + c1)*x + c0 = c0 + c1 * x + c2 * x^2.
@@ -33,6 +33,17 @@
 		(if (empty? c-rest)
 		  value
 		  (recur (pop c-rest) (+ (* value x) (peek c-rest))))))))
+
+(defn horner
+  "Given an ascending vector (or seq) of coefficients and a scalar x, horner evaluates
+   the corresponding polynomial using Horner's rule. For example, (horner [c0 c1 c2] x)
+   evaluates to (c2*x + c1)*x + c0 = c0 + c1 * x + c2 * x^2.
+   Also (horner [] x) evaluates to 0."
+  [c-vector x]
+  (if (empty? c-vector)
+    0
+    (reduce (fn [a b] (+ (* a x) b)) 0 (reverse c-vector))))
+
 
 (defn multi-horner
   "Given an ascending vector (or seq) of coefficents [c0 c1 c2 ... c{n-1}],
