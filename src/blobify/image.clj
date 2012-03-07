@@ -695,10 +695,10 @@ of integers."
 )
 
 
-(def m568 "/Users/snapp/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
-(def m568c "/Users/snapp/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
-(def m567 "/Users/snapp/data/cellNuclei/ctree/tif/m567_2kk.tif")
-(def m588 "/Users/snapp/data/cellNuclei/ctree/tif/m588_1h.tif")
+(def m568 "/Users/snapp/research/data/cellNuclei/lsmData/m568/m568_1aaa.lsm")
+(def m568c "/Users/snapp/research/data/cellNuclei/lsmData/m568/fiji/save/m568_1aaa_crop.tif")
+(def m567 "/Users/snapp/research/data/cellNuclei/ctree/tif/m567_2kk.tif")
+(def m588 "/Users/snapp/research/data/cellNuclei/ctree/tif/m588_1h.tif")
 
 (defn openlsm
   "Open the lsm image indicated by path, and return the java ImagePlus object."
